@@ -128,3 +128,24 @@
 - Request-sending/config-changing tools denied for Claude Code in `.claude/settings.json`
   (send_http1/2, repeater, intruder, set_*_options, intercept, engine, editor writes).
   Allowed: history/organizer/websocket reads, option reads, encode/decode helpers.
+
+## MVP tool list (agreed 2026-10-02)
+
+- Terminal in container (pattern A): nmap, netcat, curl, service clients (FTP/SMB/telnet/SSH/DB),
+  web content discovery + wordlists. Burp (B, done). Wireshark (A+B). Burp's browser.
+  Notes/editor on `/lab` (C). Later/optional: Metasploit, AD tooling, cracking (native on Mac
+  for GPU - Docker on Mac has no GPU), BloodHound-style GUIs. Wordlists live in the image/volume,
+  not the bind mount (slow file sharing).
+- Rule for every tool: the student runs it; Claude reads logs/history/summaries and teaches.
+
+## Wireshark gate (2026-10-02)
+
+- Image now includes tcpdump 4.99.6 + tshark 4.6.6; size 300 MB -> 623 MB (tshark deps; trim later,
+  e.g. summarise on the Mac with native tshark instead).
+- **Container side PASS:** `./capture.sh save 8` while loading Appointment via the proxy -> 17
+  packets; `./capture.sh summary` shows protocol hierarchy, the TCP conversation
+  10.10.15.248 <-> 10.129.14.194:80, and GET / -> 200 OK. That text is what the tutor reads.
+- Side observation: target MSS 1362 vs ours 1460, the tunnel shrinks the path MTU. TCP copes via
+  MSS; keep the MTU item on the stability list.
+- `captures/` is gitignored (captures can contain credentials).
+- Pending: live stream into native Wireshark (`./capture.sh live`) once Wireshark is installed.
