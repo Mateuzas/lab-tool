@@ -1,41 +1,193 @@
-/* Placeholder styling: the real design comes later. Colours are tokens so a redesign is easy. */
+/* Lab Tool. Design record: docs/design.md (pass 1). */
+
 :root {
-  --bg: #f6f6f4;
-  --card: #ffffff;
-  --text: #1c1c1e;
-  --muted: #6b6b70;
-  --ok: #2e9d57;
-  --working: #d99a1e;
-  --problem: #d23c3c;
-  --off: #9a9aa0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  color: var(--text);
-  background: var(--bg);
+  --paper: #eef1f4;
+  --ink: #1b2433;
+  --ink-soft: #5b6678;
+  --rule: #c9d0da;
+  --go: #17845f;
+  --wait: #b7791f;
+  --stop: #b3362b;
+  --field: #ffffff;
+
+  --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --s-small: 13px;
+  --s-body: 15px;
+  --s-lead: 18px;
+  --s-head: 34px;
+  --pin: 14px;
+  --line: 3px;
+  --hop-gap: 20px;
+
+  color-scheme: light dark;
+  font: 400 var(--s-body) / 1.45 var(--sans);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
 }
+
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #18181a; --card: #232326; --text: #f2f2f4; --muted: #a0a0a8; }
+  :root {
+    --paper: #151b25;
+    --ink: #e4e9f0;
+    --ink-soft: #98a3b5;
+    --rule: #2e3747;
+    --go: #3fb68b;
+    --wait: #e0a743;
+    --stop: #e5685c;
+    --field: #1d2531;
+  }
 }
+
+* { box-sizing: border-box; }
 body { margin: 0; }
-main { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
+main { max-width: 680px; padding: 44px 40px 40px; }
 
-.status {
-  display: flex; gap: 16px; align-items: flex-start;
-  background: var(--card); border-radius: 14px; padding: 20px 22px;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+.ip { font-family: var(--mono); letter-spacing: 0; }
+
+/* Status: the loudest text on screen, coloured only by meaning. */
+.status h1 {
+  margin: 0;
+  font-size: var(--s-head);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
-.dot { flex: none; width: 14px; height: 14px; margin-top: 6px; border-radius: 50%; background: var(--off); }
-.status[data-level="ok"] .dot { background: var(--ok); }
-.status[data-level="working"] .dot { background: var(--working); animation: pulse 1.4s ease-in-out infinite; }
-.status[data-level="problem"] .dot { background: var(--problem); }
-@keyframes pulse { 50% { opacity: 0.35; } }
-@media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
-
-h1 { margin: 0; font-size: 20px; font-weight: 600; }
-.status p { margin: 4px 0 0; color: var(--muted); line-height: 1.4; }
-
-.details {
-  display: grid; grid-template-columns: max-content 1fr; gap: 10px 20px;
-  margin: 20px 0 0; padding: 18px 22px; background: var(--card); border-radius: 14px;
+.status[data-level="ok"] h1 { color: var(--go); }
+.status[data-level="working"] h1 { color: var(--wait); }
+.status[data-level="problem"] h1 { color: var(--stop); }
+.status p {
+  margin: 8px 0 0;
+  max-width: 60ch;
+  font-size: var(--s-lead);
+  color: var(--ink-soft);
 }
-.details dt { color: var(--muted); }
-.details dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+/* The route. Each hop draws the line segment that leads into it, in that hop's state. */
+.route {
+  list-style: none;
+  margin: 44px 0 48px;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  column-gap: var(--hop-gap);
+}
+.route li {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding-top: calc(var(--pin) + 12px);
+  min-width: 0;
+}
+.route li + li::before {
+  content: "";
+  position: absolute;
+  top: calc((var(--pin) - var(--line)) / 2);
+  left: calc(-100% - var(--hop-gap) + var(--pin) + 4px);
+  width: calc(100% + var(--hop-gap) - var(--pin) - 8px);
+  height: var(--line);
+  border-radius: var(--line);
+  background: var(--rule);
+}
+.pin {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--pin);
+  height: var(--pin);
+  border-radius: 50%;
+  border: var(--line) solid var(--rule);
+  background: var(--paper);
+}
+.name { font-weight: 700; }
+.note {
+  font-size: var(--s-small);
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.route [data-state="on"] .pin { background: var(--go); border-color: var(--go); }
+.route [data-state="on"]::before { background: var(--go); }
+.route [data-state="wait"] .pin { border-color: var(--wait); }
+.route [data-state="broken"] .pin { border-color: var(--stop); background: var(--paper); }
+.route [data-state="broken"] .note { color: var(--stop); }
+/* A broken hop: its incoming segment is cut in the middle, so you can see where it fails. */
+.route [data-state="broken"]::before {
+  background: linear-gradient(90deg, var(--stop) 0 40%, transparent 40% 60%, var(--stop) 60%);
+}
+/* The one motion in the app: the segment flows while the VPN is connecting. */
+.route [data-state="wait"]::before {
+  background: repeating-linear-gradient(90deg, var(--wait) 0 10px, transparent 10px 18px);
+  background-size: 18px 100%;
+  animation: flow 0.9s linear infinite;
+}
+@keyframes flow { to { background-position: 18px 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .route [data-state="wait"]::before { animation: none; }
+}
+
+/* Controls: label column, field, action. */
+.controls { display: grid; gap: 14px; }
+.controls[hidden] { display: none; }
+.row {
+  display: grid;
+  grid-template-columns: 108px 1fr 150px;
+  gap: 12px;
+  align-items: start;
+}
+.row label { padding-top: 9px; color: var(--ink-soft); }
+.field { min-width: 0; }
+
+select,
+input,
+button {
+  font: inherit;
+  color: inherit;
+  height: 40px;
+  border-radius: 8px;
+}
+select,
+input {
+  width: 100%;
+  padding: 0 12px;
+  background: var(--field);
+  border: 1px solid var(--rule);
+}
+input::placeholder { color: var(--ink-soft); font-family: var(--sans); }
+select:disabled,
+input:disabled { opacity: 0.55; }
+
+button {
+  padding: 0 16px;
+  border: 1px solid var(--ink);
+  background: transparent;
+  font-weight: 700;
+  cursor: pointer;
+}
+button.primary { background: var(--ink); color: var(--paper); }
+button:disabled { opacity: 0.4; cursor: default; }
+button:not(:disabled):active { transform: translateY(1px); }
+
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.hint { margin: 2px 0 0; max-width: 46ch; color: var(--ink-soft); }
+.error { margin: 0; color: var(--stop); max-width: 60ch; }
+.meta { margin: 10px 0 0; font-size: var(--s-small); color: var(--ink-soft); }
+.meta .ip { color: var(--ink); margin-left: 6px; }
+
+/* Narrow windows: the route turns vertical, controls stack. */
+@media (max-width: 600px) {
+  main { padding: 28px 20px; }
+  .route { grid-template-columns: 1fr; row-gap: 18px; column-gap: 0; }
+  .route li { padding: 0 0 0 calc(var(--pin) + 14px); }
+  .route li + li::before {
+    top: calc(-18px + 2px);
+    left: calc((var(--pin) - var(--line)) / 2);
+    width: var(--line);
+    height: 14px;
+  }
+  .row { grid-template-columns: 1fr; gap: 6px; }
+  .row label { padding-top: 0; }
+}

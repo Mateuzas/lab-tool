@@ -3,27 +3,70 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="stylesheet" href="/src/styles.css" />
     <title>Lab Tool</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
     <main>
-      <section class="status" id="status" data-level="working" aria-live="polite">
-        <span class="dot" aria-hidden="true"></span>
-        <div>
-          <h1 id="title">Checking the lab…</h1>
-          <p id="message"></p>
-        </div>
-      </section>
+      <header class="status" id="status" data-level="working" aria-live="polite">
+        <h1 id="title">Checking the lab…</h1>
+        <p id="message"></p>
+      </header>
 
-      <dl class="details" id="details" hidden>
-        <dt>Lab network</dt><dd id="d-server"></dd>
-        <dt>Your lab IP</dt><dd id="d-ip"></dd>
-        <dt>Target</dt><dd id="d-targets"></dd>
-        <dt>Connection</dt><dd id="d-latency"></dd>
-        <dt>Protection</dt><dd id="d-protection"></dd>
-      </dl>
+      <!-- The route: how this Mac reaches the lab. Each hop says its state in words, not only colour. -->
+      <ol class="route" id="route" aria-label="How your Mac reaches the lab">
+        <li data-hop="mac" data-state="on">
+          <span class="pin"></span><span class="name">This Mac</span><span class="note" id="n-mac">Ready</span>
+        </li>
+        <li data-hop="guard" data-state="off">
+          <span class="pin"></span><span class="name">Kill switch</span><span class="note" id="n-guard"></span>
+        </li>
+        <li data-hop="vpn" data-state="off">
+          <span class="pin"></span><span class="name">VPN</span><span class="note" id="n-vpn"></span>
+        </li>
+        <li data-hop="lab" data-state="off">
+          <span class="pin"></span><span class="name">HTB lab</span><span class="note" id="n-lab"></span>
+        </li>
+        <li data-hop="target" data-state="off">
+          <span class="pin"></span><span class="name">Target</span><span class="note" id="n-target"></span>
+        </li>
+      </ol>
+
+      <section class="controls">
+        <form class="row" id="network-form">
+          <label for="network">Lab network</label>
+          <div class="field">
+            <select id="network" disabled></select>
+            <p class="hint" id="network-hint" hidden>
+              No lab network yet. On HTB, choose Connect to HTB, then OpenVPN, download the file, and
+              put it in the lab's vpn folder.
+            </p>
+          </div>
+          <button type="submit" class="primary" id="primary" disabled>Connect</button>
+        </form>
+
+        <form class="row" id="target-form">
+          <label for="target">Target</label>
+          <div class="field">
+            <input
+              id="target"
+              class="ip"
+              type="text"
+              inputmode="decimal"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="IP of the machine you spawned"
+            />
+          </div>
+          <button type="submit" id="target-button">Set target</button>
+        </form>
+
+        <p class="error" id="error" role="alert" hidden></p>
+
+        <p class="meta" id="meta" hidden>
+          Your lab IP <span class="ip" id="lab-ip"></span>
+        </p>
+      </section>
     </main>
   </body>
 </html>

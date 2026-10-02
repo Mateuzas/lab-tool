@@ -3,7 +3,7 @@ SHELL := /bin/bash
 SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh)
 VPN ?= starting
 
-.PHONY: help build up down status lint test test-target clean app-dev app-test app-build
+.PHONY: help build up down status lint test test-target clean app-dev app-test app-build app-shots
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -48,3 +48,6 @@ app-test: ## type-check the UI, run Rust unit tests (no Docker needed)
 
 app-build: ## build the release .app / .dmg
 	cd app && npm install --silent && $(CARGO_PATH) npm run tauri build
+
+app-shots: ## screenshots of every UI state (light + dark) into app/ui-shots/ (needs `make app-dev` or `npm run dev`)
+	cd app && mkdir -p ui-shots && node scripts/ui-shots.mjs ui-shots light && node scripts/ui-shots.mjs ui-shots dark

@@ -312,3 +312,13 @@ move: ALL PASS, same timings.
 - Hardening from day one: removed unused opener plugin + its permission; strict CSP instead of
   the template's `csp: null`; `withGlobalTauri` off; lab data rendered with textContent only.
 - `make app-dev`, `make app-test`, `make app-build`.
+
+## App: connect controls (2026-10-02)
+
+- Backend: `vpn_files` (reads only each file's `remote` host; labels like "Starting Point (EU 2)"),
+  `connect` (file must be one of the listed ones), `disconnect`, `set_target` (IPv4 parse; value
+  passed to the container as an argv, never spliced into a shell command). Starts the container
+  if it was stopped.
+- Live round trip (`cargo test -- --ignored`): disconnect -> reconnect in 11 s with the same
+  file; `../../etc/passwd` and `not an ip; rm -rf /` refused; target restored.
+- UI pass 1 per docs/design.md (frontend-design skill), checked via screenshots of all states.
