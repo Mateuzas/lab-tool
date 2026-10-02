@@ -3,7 +3,7 @@ SHELL := /bin/bash
 SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh)
 VPN ?= starting
 
-.PHONY: help build up down status lint test test-target clean
+.PHONY: help build up down status lint test test-target clean app-dev app-test app-build
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -36,3 +36,15 @@ test-target: ## kill switch + proxy tests against a spawned machine: make test-t
 
 clean: ## remove the container (workspace data is kept)
 	-docker rm -f kali-lab
+
+CARGO_PATH := PATH="$(HOME)/.cargo/bin:$$PATH"
+
+app-dev: ## run the desktop app in development mode (hot reload)
+	cd app && npm install --silent && $(CARGO_PATH) npm run tauri dev
+
+app-test: ## type-check the UI, run Rust unit tests (no Docker needed)
+	cd app && npm install --silent && npm run build
+	cd app/src-tauri && $(CARGO_PATH) cargo test
+
+app-build: ## build the release .app / .dmg
+	cd app && npm install --silent && $(CARGO_PATH) npm run tauri build

@@ -297,3 +297,18 @@ move: ALL PASS, same timings.
   (honest framing, which also reads as legitimate). NOT tuning wording to evade safety
   classifiers (fragile, wrong foundation). Revisit the Anthropic usage-policy question later,
   with 6.2 (who pays for Claude).
+
+## App scaffold (2026-10-02): Tauri 2
+
+- Framework: Tauri (recommended over Swift: one codebase for the later Windows version, web UI
+  for fast design iteration, xterm.js for the student terminal). UI template `vanilla-ts` so
+  no UI framework is imposed before Matas designs the UI.
+- Toolchain: Rust 1.99 via rustup (`~/.cargo`, shell profile untouched), Node 22, Tauri 2.
+- `app/src-tauri/src/lab.rs`: Docker Engine API via bollard 0.21 (Unix socket, falls back to
+  Docker Desktop's `~/.docker/run/docker.sock`; named pipe on Windows). Reads status.json by
+  exec inside the container (not the shared folder). Maps everything to plain-language
+  ok/working/problem/off, incl. "Docker isn't running", "Lab not set up", "Lab not responding"
+  (status older than 20 s). 5 unit tests + 1 live test (`cargo test -- --ignored`): live read 0.07 s.
+- Hardening from day one: removed unused opener plugin + its permission; strict CSP instead of
+  the template's `csp: null`; `withGlobalTauri` off; lab data rendered with textContent only.
+- `make app-dev`, `make app-test`, `make app-build`.

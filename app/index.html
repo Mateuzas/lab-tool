@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <title>Lab Tool</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+  <body>
+    <main>
+      <section class="status" id="status" data-level="working" aria-live="polite">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <h1 id="title">Checking the lab…</h1>
+          <p id="message"></p>
+        </div>
+      </section>
+
+      <dl class="details" id="details" hidden>
+        <dt>Lab network</dt><dd id="d-server"></dd>
+        <dt>Your lab IP</dt><dd id="d-ip"></dd>
+        <dt>Target</dt><dd id="d-targets"></dd>
+        <dt>Connection</dt><dd id="d-latency"></dd>
+        <dt>Protection</dt><dd id="d-protection"></dd>
+      </dl>
+    </main>
+  </body>
+</html>
