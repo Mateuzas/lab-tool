@@ -83,3 +83,18 @@
   student pick the section (or the machine) so the app switches tunnels automatically. Files only
   change if the student changes server. HTB API automation of this is a grey area under AUP
   6.1/6.3, so do not build it without asking HTB.
+
+## Gate run 2 (2026-10-02, Starting Point VPN, target Appointment 10.129.14.194)
+
+| Step | Result |
+|---|---|
+| 2.2-2.8 | PASS. `./vpn-up.sh starting`, edge-eu-starting-point-2, tun0 10.10.15.248, up in ~4 s. |
+| 2.9 | PASS. Ping 90-125 ms, `nmap -F`: 80/tcp open http (1.96 s). |
+| 3.5 | PASS. Mac -> 127.0.0.1:1080 -> container -> tun0 -> target: HTTP 200. |
+| 3.6 | PASS as written: with openvpn killed, curl via proxy timed out (10 s), no HTTP response. Restored -> 200. |
+
+- **Caveat on 3.6:** a timeout means the SYN *was sent* - out eth0 to the home router - and nothing
+  answered. On this LAN that is harmless; on a network that routes 10.0.0.0/8 it would reach
+  real hosts. The gate passes, but a kill switch (container egress: lab ranges only via tun0,
+  eth0 only to the VPN server) is still required in the tool-server task.
+- **Tasks 2 and 3 pass.** Per Global Constraints, Task 4 (Burp) is next.
