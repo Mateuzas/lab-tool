@@ -61,3 +61,14 @@
   `~/kali-lab`, read this path. Container recreated with `-v ~/Desktop/Projects/kali-lab:/lab`.
 - Packages now come from `Dockerfile` (image `kali-lab:spike`) instead of a manual
   `apt install`, so recreating the container keeps them. Same run flags as step 1.4.
+
+## Gate run 1 (2026-10-02, real HTB VPN)
+
+- **Task 2.2-2.8: PASS.** `vpn-up.sh` brought the tunnel up in 4 s (UDP 1337, edge-eu-free-3).
+  tun0 = 10.10.15.46/23; 10.129.0.0/16 and other lab ranges via tun0; 8.8.8.8 via eth0.
+  Clocks identical. Hook check clean. Only warnings: deprecated `persist-key` and compression.
+- **Task 3.3-3.4: PASS** again with the tunnel up (eth0-only listener, Mac 127.0.0.1 only).
+- **Task 2.9: blocked, not a gate failure.** Target 10.129.14.180 -> "Destination Host
+  Unreachable" from the HTB gateway 10.10.14.1 (so the tunnel works). The VPN file was for the
+  Labs free server, and the machine was on another VPN network. Beginner UX lesson: the app
+  must match the VPN file to the section/server the machine was spawned on, or say clearly why not.
