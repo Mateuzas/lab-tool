@@ -1,25 +1,37 @@
 #!/usr/bin/env bash
 # Tasks 2.2-2.8 and 3.3: start the lab VPN and the eth0-only SOCKS proxy in the kali-lab container.
-# Run on the Mac: ./vpn-up.sh
+# Run on the Mac: ./vpn-up.sh [name-filter]   e.g. ./vpn-up.sh starting  or  ./vpn-up.sh machines
+# Keep one .ovpn per HTB section in this folder; the filter picks which one to connect with.
 set -euo pipefail
+
+FILTER=${1:-}
 
 in_kali() { docker exec kali-lab bash -c "$1"; }
 
 docker start kali-lab >/dev/null
 
-echo "== 2.2 exactly one VPN file"
-count=$(in_kali 'ls /lab/*.ovpn 2>/dev/null | wc -l')
-[ "$count" -eq 1 ] || { echo "FAIL: expected 1 .ovpn in ~/Desktop/Projects/kali-lab, found $count"; exit 1; }
+echo "== 2.2 pick exactly one VPN file"
+matches=$(in_kali "ls /lab/*.ovpn 2>/dev/null | grep -i -- '$FILTER' || true")
+count=$(printf '%s' "$matches" | grep -c . || true)
+if [ "$count" -ne 1 ]; then
+  echo "FAIL: '${FILTER:-*}' matches $count .ovpn files in ~/Desktop/Projects/kali-lab:"
+  in_kali 'for f in /lab/*.ovpn; do echo "  $(basename "$f")  ->  $(grep -m1 "^remote " "$f" | cut -d" " -f2)"; done' || true
+  echo "Pass a word from one file name, e.g. ./vpn-up.sh starting"
+  exit 1
+fi
+OVPN=$matches
+echo "using $(basename "$OVPN")"
+in_kali "echo '$OVPN' > /tmp/ovpn.path"
 
 echo "== 2.3 hook check"
-if in_kali "grep -nE '^(script-security|up|down|route-up|route-pre-down|plugin|tls-verify|auth-user-pass-verify)' /lab/*.ovpn"; then
+if in_kali "grep -nE '^(script-security|up|down|route-up|route-pre-down|plugin|tls-verify|auth-user-pass-verify)' '$OVPN'"; then
   echo "FAIL: the .ovpn contains script hooks. Do not connect. Re-download it from your HTB account."
   exit 1
 fi
 echo "ok, no hooks"
 
 echo "== 2.4/2.5 start tunnel"
-if ! in_kali 'pkill openvpn || true; openvpn --config /lab/*.ovpn --daemon --log /tmp/ovpn.log'; then
+if ! in_kali "pkill openvpn || true; sleep 1; openvpn --config '$OVPN' --daemon --log /tmp/ovpn.log"; then
   echo "FAIL: openvpn refused to start. Log:"
   in_kali 'tail -n 8 /tmp/ovpn.log'
   exit 1

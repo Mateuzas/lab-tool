@@ -28,7 +28,7 @@ else
 fi
 
 echo "== restore tunnel"
-in_kali 'openvpn --config /lab/*.ovpn --daemon --log /tmp/ovpn.log'
+in_kali 'openvpn --config "$(cat /tmp/ovpn.path)" --daemon --log /tmp/ovpn.log'
 for _ in $(seq 1 30); do in_kali 'ip -br addr show tun0' >/dev/null 2>&1 && break; sleep 1; done
 sleep 3
 code=$(via_proxy) || true
