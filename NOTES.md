@@ -108,3 +108,11 @@
   App consequence: the app can launch Burp pre-configured; beginners never open Settings.
 - Install note: the DMG must be dragged to Applications; the app is now named `Burp Suite.app`
   (not "Burp Suite Community Edition.app"). Detection should use the bundle, not the name.
+- **4.3: PASS.** Burp's browser loaded http://10.129.14.194/ (Appointment login page). Container
+  `ss` showed ESTAB 10.10.15.248 -> 10.129.14.194:80, i.e. Burp traffic left via tun0.
+- **4.4: PASS.** Proxy > HTTP history row 1: GET / -> 200, 5125 bytes, HTML, title "Login",
+  server Apache/2.4.38 (Debian). IP column reads "unknown host" because DNS goes over SOCKS
+  (expected, not an error). Burp's own AI shows "Disabled" in Community.
+- **4.5 DECISION: PASS. The Docker architecture is confirmed** (Tasks 2, 3, 4 all pass on M4,
+  macOS 26.5.2). Landing-site claims and app work are unblocked. UTM VM stays parked.
+- Open before app work: kill switch (3.6 caveat), Task 5 tutor test, Task 6.2 + 6.5 (Matas).
