@@ -3,7 +3,7 @@ mod term;
 mod tools;
 
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 /// Current lab status for the UI. Never fails: problems come back as a plain-language status.
 #[tauri::command]
@@ -19,6 +19,11 @@ async fn vpn_files() -> Result<Vec<lab::VpnFile>, String> {
 #[tauri::command]
 async fn connect(file: String) -> Result<(), String> {
     lab::connect(&file).await
+}
+
+#[tauri::command]
+async fn add_vpn_file(name: String, content: String) -> Result<lab::VpnFile, String> {
+    lab::add_vpn_file(&name, &content).await
 }
 
 #[tauri::command]
@@ -39,6 +44,43 @@ async fn term_open(
     terms: State<'_, term::Terminals>,
 ) -> Result<u32, String> {
     terms.open(cols, rows, on_event).await
+}
+
+/// Show an existing shell in the calling window (used by a popped-out terminal and when one moves back in).
+#[tauri::command]
+async fn term_attach(id: u32, on_event: Channel<term::TermEvent>, terms: State<'_, term::Terminals>) -> Result<(), String> {
+    terms.attach(id, on_event).await
+}
+
+/// Move a shell into its own window. Closing that window (or `term_dock`) tells the main window to take it back.
+#[tauri::command]
+async fn term_popout(app: AppHandle, id: u32, title: String) -> Result<(), String> {
+    let label = format!("term-{id}");
+    if let Some(w) = app.get_webview_window(&label) {
+        return w.set_focus().map_err(|e| e.to_string());
+    }
+    let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(format!("index.html?popout={id}").into()))
+        .title(format!("Lab Tool: {title}"))
+        .inner_size(900.0, 560.0)
+        .min_inner_size(360.0, 200.0)
+        .build()
+        .map_err(|e| format!("Couldn't open the terminal in its own window: {e}"))?;
+    let handle = app.clone();
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            let _ = handle.emit_to("main", "term-docked", id);
+            if let Some(main) = handle.get_webview_window("main") {
+                let _ = main.set_focus();
+            }
+        }
+    });
+    Ok(())
+}
+
+/// Close the calling pop-out window; the main window takes the terminal back.
+#[tauri::command]
+async fn term_dock(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -99,11 +141,17 @@ pub fn run() {
         .manage(term::Terminals::default())
         .manage(tools::Tools::default())
         .invoke_handler(tauri::generate_handler![
-            lab_status, vpn_files, connect, disconnect, set_target,
-            term_open, term_write, term_resize, term_close,
+            lab_status, vpn_files, connect, disconnect, set_target, add_vpn_file,
+            term_open, term_attach, term_popout, term_dock, term_write, term_resize, term_close,
             burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
             claude_status, open_tutor
         ])
+        .on_window_event(|window, event| {
+            // Pop-out terminals must not outlive the app.
+            if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

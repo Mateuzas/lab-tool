@@ -53,10 +53,12 @@
             <form class="strip" id="network-form">
               <select id="network" aria-label="Lab network" disabled></select>
               <p class="hint" id="network-hint" hidden>
-                No lab network yet. On HTB, choose Connect to HTB, then OpenVPN, download the file, and
-                put it in the lab's vpn folder.
+                Download your VPN file from HTB (Connect to HTB, then OpenVPN), then add it here.
               </p>
               <button type="submit" class="primary" id="primary" disabled>Connect</button>
+              <button type="button" class="link" id="add-vpn" hidden>Add a VPN file</button>
+              <input type="file" id="vpn-file" accept=".ovpn" hidden />
+              <p class="strip-note" id="network-note" role="status" aria-live="polite"></p>
             </form>
 
             <form class="strip" id="target-form">
@@ -71,6 +73,7 @@
                 placeholder="IP of the machine you spawned"
               />
               <button type="submit" id="target-button">Set target</button>
+              <p class="strip-note" id="target-note" role="status" aria-live="polite"></p>
             </form>
 
             <p class="error" id="error" role="alert" hidden></p>
@@ -78,12 +81,20 @@
         </div>
       </section>
 
-      <!-- The workspace: takes all remaining height. Stays mounted while hidden so the shell keeps running. -->
-      <section class="term-panel" id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden>
-        <div class="term-host" id="term-host"></div>
-        <div class="term-cover" id="term-cover">
-          <p data-msg>The terminal opens when the lab is running.</p>
-          <button type="button" hidden>Open a new terminal</button>
+      <!-- The workspace: takes all remaining height. Stays mounted while hidden so the shells keep running. -->
+      <section class="term-wrap" id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden>
+        <div class="term-bar">
+          <div class="term-strip" id="term-strip" role="group" aria-label="Open terminals"></div>
+          <button type="button" id="term-new">New terminal</button>
+          <button type="button" id="term-pop">Pop out</button>
+          <button type="button" id="term-dock">Move back to the app</button>
+        </div>
+        <p class="error" id="term-error" role="alert" hidden></p>
+        <div class="term-panel" id="term-panel">
+          <div class="term-cover" id="term-cover">
+            <p id="term-cover-msg">The terminal opens when the lab is running.</p>
+            <button type="button" id="term-cover-action" hidden>Open a new terminal</button>
+          </div>
         </div>
       </section>
 

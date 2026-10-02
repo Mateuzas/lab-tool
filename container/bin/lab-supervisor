@@ -22,6 +22,7 @@ mkdir -p "$STATE"
 vpn_pid=""; current=""; vpn_started=0; restarts=0; gw_fails=0; ever_connected=""
 scope_sig=""; scope_ok=""; scope_bad=""
 declare -A tgt_seen tgt_fails   # per target: answered a ping at least once / consecutive misses
+target_live=""                  # targets answering right now
 target_lost=""                  # targets that answered before and have stopped (machine off or tunnel cut)
 state=starting; message="Starting the lab"; state_since=$(date +%s); gateway_ms=""; refused=""
 
@@ -43,9 +44,9 @@ write_status() {
   elif iptables -S OUTPUT 2>/dev/null | grep -q REJECT; then ks=block
   else ks=off; fi
   [ -n "$current" ] && server=$(awk '/^remote /{print $2; exit}' "$VPN_DIR/$current" 2>/dev/null)
-  printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","targets":"%s","blocked_targets":"%s","lost_targets":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
+  printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","targets":"%s","blocked_targets":"%s","live_targets":"%s","lost_targets":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
     "$state" "$message" "$current" "$server" "$lab_ip" "$gateway_ms" "$proxy" "$ks" \
-    "$scope_ok" "$scope_bad" "$target_lost" "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+    "$scope_ok" "$scope_bad" "$target_live" "$target_lost" "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
 }
 
 stop_vpn() {
@@ -116,7 +117,7 @@ host_alive() {
 # one that never answered after 10 (~30 s: machine not started, expired or wrong IP). One answer
 # clears it. Speaking in "answering", not "up": a hardened box can stay silent and look the same.
 check_targets() {
-  local ip lost="" known=" $scope_ok " limit
+  local ip lost="" live="" known=" $scope_ok " limit
   for ip in "${!tgt_seen[@]}" "${!tgt_fails[@]}"; do   # forget targets the student removed
     case "$known" in *" $ip "*) ;; *) unset "tgt_seen[$ip]" "tgt_fails[$ip]" ;; esac
   done
@@ -124,7 +125,7 @@ check_targets() {
     if host_alive "$ip"; then
       if [ -z "${tgt_seen[$ip]:-}" ]; then log "target $ip is answering"
       elif [ "${tgt_fails[$ip]:-0}" -ge 3 ]; then log "target $ip is back"; fi
-      tgt_seen[$ip]=1; tgt_fails[$ip]=0
+      tgt_seen[$ip]=1; tgt_fails[$ip]=0; live="$live $ip"
     else
       tgt_fails[$ip]=$(( ${tgt_fails[$ip]:-0} + 1 ))
       limit=10; [ -n "${tgt_seen[$ip]:-}" ] && limit=3
@@ -134,7 +135,7 @@ check_targets() {
       fi
     fi
   done
-  target_lost=${lost# }
+  target_lost=${lost# }; target_live=${live# }
 }
 
 ensure_proxy() {
@@ -170,7 +171,7 @@ while true; do
 
   if [ "$selected" != "$current" ]; then
     stop_vpn; current=$selected; refused=""; restarts=0; ever_connected=""
-    tgt_seen=(); tgt_fails=(); target_lost=""
+    tgt_seen=(); tgt_fails=(); target_lost=""; target_live=""
     lab-kill-switch block >/dev/null 2>&1
     if [ -n "$current" ] && [ -f "$VPN_DIR/$current" ] && grep -qE "$HOOKS" "$VPN_DIR/$current"; then
       refused=yes
@@ -202,9 +203,9 @@ while true; do
     if [ -n "$gw" ]; then
       ensure_scope "$gw"
       gateway_ms=$(ping -c 1 -W 2 "$gw" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p')
-      [ -n "$gateway_ms" ] && check_targets || target_lost=""   # no tunnel, no verdict on the machine
+      [ -n "$gateway_ms" ] && check_targets || { target_lost=""; target_live=""; }   # no tunnel, no verdict on the machine
     else
-      gateway_ms=""; target_lost=""
+      gateway_ms=""; target_lost=""; target_live=""
     fi
 
     if [ -n "$gateway_ms" ]; then

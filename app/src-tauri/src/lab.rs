@@ -218,6 +218,56 @@ pub async fn disconnect() -> Result<(), String> {
     write_state("selected-vpn", "").await
 }
 
+/// OpenVPN options that run programs on the computer. HTB's files never contain them; a file
+/// that does is refused (same list as the supervisor's check).
+const VPN_HOOKS: &[&str] = &[
+    "script-security", "up", "down", "route-up", "route-pre-down", "ipchange", "plugin",
+    "tls-verify", "auth-user-pass-verify", "client-connect", "learn-address",
+];
+const VPN_MAX_BYTES: usize = 64 * 1024;
+
+/// Check a VPN file the student picked and return the name to save it under. Pure (no I/O).
+pub fn check_vpn_file(name: &str, content: &str) -> Result<String, String> {
+    let not_vpn = || "That isn't a VPN file. Choose the .ovpn file you downloaded from HTB.".to_string();
+    // Keep only the file name, and only safe characters, so it can't point outside the folder.
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let clean: String = base
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' })
+        .collect();
+    if !clean.to_ascii_lowercase().ends_with(".ovpn") || clean.len() > 100 || clean.starts_with('.') {
+        return Err(not_vpn());
+    }
+    if content.len() > VPN_MAX_BYTES || !content.lines().any(|l| l.trim_start().starts_with("remote ")) {
+        return Err(not_vpn());
+    }
+    let hooked = content.lines().any(|l| {
+        let first = l.split_whitespace().next().unwrap_or("");
+        VPN_HOOKS.contains(&first)
+    });
+    if hooked {
+        return Err("This VPN file contains commands that could run on your computer, so it wasn't \
+                    added. Download it again from HTB."
+            .into());
+    }
+    Ok(clean)
+}
+
+/// Save a VPN file into the lab's vpn folder (owner-only permissions: it holds credentials).
+/// Name and content go to the container as arguments, never spliced into the shell command.
+pub async fn add_vpn_file(name: &str, content: &str) -> Result<VpnFile, String> {
+    let file = check_vpn_file(name, content)?;
+    let docker = running_lab().await?;
+    let script = r#"umask 077 && mkdir -p /lab/vpn && printf '%s' "$1" > "/lab/vpn/.$2.tmp" && mv "/lab/vpn/.$2.tmp" "/lab/vpn/$2""#;
+    exec(&docker, &["sh", "-c", script, "sh", content, &file]).await.map_err(|e| e.to_string())?;
+    let host = content
+        .lines()
+        .find_map(|l| l.trim_start().strip_prefix("remote "))
+        .and_then(|r| r.split_whitespace().next())
+        .unwrap_or("");
+    Ok(VpnFile { label: vpn_label(&file, host), file })
+}
+
 /// Set the one machine the student spawned (empty = none). Only well-formed IPv4 addresses get
 /// through; the supervisor then refuses anything that isn't routed through the VPN.
 pub async fn set_target(ip: &str) -> Result<(), String> {
@@ -258,6 +308,30 @@ async fn write_state(name: &'static str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const GOOD: &str = "client\ndev tun\nproto udp\nremote edge-eu-starting-point-2-dhcp.hackthebox.eu 1337\n";
+
+    #[test]
+    fn vpn_file_accepted_and_name_cleaned() {
+        assert_eq!(check_vpn_file("starting_points_eu.ovpn", GOOD).unwrap(), "starting_points_eu.ovpn");
+        assert_eq!(check_vpn_file("/Users/x/Downloads/my lab.ovpn", GOOD).unwrap(), "my_lab.ovpn");
+        assert_eq!(check_vpn_file("../../etc/evil.ovpn", GOOD).unwrap(), "evil.ovpn");
+    }
+
+    #[test]
+    fn vpn_file_refused_when_not_a_vpn_file() {
+        assert!(check_vpn_file("notes.txt", GOOD).is_err());
+        assert!(check_vpn_file(".ovpn", GOOD).is_err());
+        assert!(check_vpn_file("lab.ovpn", "just some text").is_err());
+        assert!(check_vpn_file("lab.ovpn", &"x".repeat(VPN_MAX_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn vpn_file_with_hooks_refused() {
+        let hooked = format!("{GOOD}script-security 2\nup /tmp/x.sh\n");
+        let err = check_vpn_file("lab.ovpn", &hooked).unwrap_err();
+        assert!(err.contains("could run on your computer"));
+    }
 
     fn st(state: &str, updated: i64) -> Value {
         json!({ "state": state, "message": "msg", "updated": updated })
@@ -344,6 +418,19 @@ mod tests {
         assert!(set_target("10.129.15").await.is_err(), "malformed IP must be refused");
         assert!(set_target("not an ip; rm -rf /").await.is_err(), "junk must be refused");
         set_target(&target).await.unwrap(); // restore
+    }
+
+    /// Adds a harmless test VPN file to the real lab, checks it is listed and owner-only, removes it.
+    #[tokio::test]
+    #[ignore]
+    async fn live_add_vpn_file() {
+        let added = add_vpn_file("/tmp/zz test.ovpn", GOOD).await.unwrap();
+        assert_eq!((added.file.as_str(), added.label.as_str()), ("zz_test.ovpn", "Starting Point (EU 2)"));
+        assert!(vpn_files().await.unwrap().iter().any(|f| f.file == "zz_test.ovpn"));
+        let docker = running_lab().await.unwrap();
+        let mode = exec(&docker, &["stat", "-c", "%a", "/lab/vpn/zz_test.ovpn"]).await.unwrap();
+        exec(&docker, &["rm", "-f", "/lab/vpn/zz_test.ovpn"]).await.unwrap();
+        assert_eq!(mode.trim(), "600");
     }
 
     /// Talks to the real Docker. Run with: cargo test -- --ignored

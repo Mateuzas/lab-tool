@@ -250,3 +250,31 @@ sandbox: reads the command log, lab status and Burp history; cannot run commands
 files). Model = whatever the user's Claude Code is set to; the app does not pin one.
 Not installed -> "Get Claude Code" (fixed official URL). Dev-only for now: the tutor folder
 path is the repo's; a packaged app will need its own copy of the tutor config.
+
+## Pass 6 (2026-10-02): several terminals + pop-out
+
+- Terminal tab has its own tab strip ("Terminal 1", "Terminal 2", each with a close ×) and two
+  plain-word buttons: **New terminal**, **Pop out**. Active tab is filled black so it reads as
+  part of the black panel. Switching tabs keeps each shell and its history.
+- **Pop out** opens that shell in its own OS window (`term-<id>`, loads `index.html?popout=<id>`),
+  so it can be dragged anywhere. The window shows only the terminal and **Move back to the app**;
+  closing the window with the X does the same. The tab returns to the app with its history.
+- Backend (`term.rs`): a shell no longer belongs to one window. Its output channel is swappable
+  (`term_attach`) and the last 256 KB is kept and replayed into whichever window attaches, so
+  moving a terminal doesn't blank it. Popped-out shells survive the main window's tab; quitting
+  the app (closing the main window) closes pop-outs and ends the shells.
+- An ended shell says "This terminal has ended." with Close this tab / Close window.
+- Verified in the browser preview (mock shells; the mock's pop-out is a fresh shell, since the
+  real hand-over happens in Rust). `cargo check` passes. Not yet run in the real app.
+
+## Pass 7 (2026-10-02): add a VPN file from the app
+
+- No files: hint "Download your VPN file from HTB (Connect to HTB, then OpenVPN), then add it
+  here." and the main button becomes "Add VPN file" (the only next step).
+- Files exist: strip unchanged; a small text button "Add a VPN file" under the list.
+- After adding: new file selected; a short confirmation "Added <label>." (role=status).
+- Plain-word errors from the backend. The file is read in the webview (file picker) and sent as
+  text; no filesystem permission is granted to the frontend.
+- Built: "Add VPN file" (empty state main button) and "Add a VPN file" text button; confirmation
+  and errors reuse the strip's status line. Self-critique: the text button inherited the strip's
+  button min-width (looked indented); selection now only changes to a file that is listed.

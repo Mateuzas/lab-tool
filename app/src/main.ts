@@ -3,7 +3,7 @@ import "@fontsource/atkinson-hyperlegible-next/700.css";
 import "@fontsource/atkinson-hyperlegible-mono/400.css";
 import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
-import { setupTerminal } from "./terminal";
+import { setupPopout, setupTerminal } from "./terminal";
 import { setupTools } from "./tools";
 
 /** Mirrors lab::LabStatus in src-tauri/src/lab.rs. */
@@ -112,6 +112,7 @@ function drawControls() {
     select.value = files.some((f) => f.file === keep) ? keep : files[0]?.file ?? "";
   }
   const labReachable = !!lab;
+  drawNetworkNote(lab, labReachable);
   // No lab (Docker off, not set up): the headline is the only instruction, so hide the controls.
   document.querySelector<HTMLElement>(".controls")!.hidden = !labReachable;
   $("network-hint").hidden = files.length > 0;
@@ -119,19 +120,82 @@ function drawControls() {
 
   select.disabled = !labReachable || pending;
   $<HTMLInputElement>("target").disabled = !labReachable;
-  $<HTMLButtonElement>("target-button").disabled = !labReachable;
 
   // One primary action whose label says what it will do.
   const active = ["connected", "connecting", "reconnecting", "starting", "error", "offline"].includes(state) && !!current;
-  if (!active) primary.textContent = "Connect";
+  if (files.length === 0) primary.textContent = "Add VPN file"; // the only next step
+  else if (!active) primary.textContent = "Connect";
   else if (select.value && select.value !== current) primary.textContent = "Switch network";
   else primary.textContent = "Disconnect";
-  primary.disabled = !labReachable || pending || files.length === 0;
+  primary.disabled = !labReachable || pending;
+  $("add-vpn").hidden = files.length === 0; // with no files, the main button already does this
 
-  const tInput = $<HTMLInputElement>("target");
-  const tCurrent = lab ? String(lab["targets"] ?? "") : "";
-  $<HTMLButtonElement>("target-button").textContent =
-    tInput.value.trim() === "" && tCurrent ? "Clear target" : "Set target";
+  drawTarget(lab, labReachable);
+}
+
+// ---- Lab network: a line under the picker says what the Connect button did and where it stands ----
+type Note = { kind: "ok" | "error" | "info"; text: string };
+let networkNote: Note | null = null; // result of the student's last action, until they do something else
+
+function drawNetworkNote(lab: LabStatus["lab"] | undefined, labReachable: boolean) {
+  const note = $("network-note");
+  const str = (k: string) => (lab ? String(lab[k] ?? "") : "");
+  const state = str("state");
+  const name = labelFor(str("vpn_file"));
+  let line: Note | null = networkNote;
+  if (!line && labReachable) {
+    if (state === "connected") line = { kind: "ok", text: `Connected to ${name}.` };
+    else if (state === "connecting" || state === "starting") line = { kind: "info", text: `Connecting to ${name}…` };
+    else if (state === "reconnecting") line = { kind: "info", text: `Lost the connection. Reconnecting to ${name}…` };
+    else if (state === "error" || state === "offline") line = { kind: "error", text: str("message") };
+  }
+  note.textContent = line?.text ?? "";
+  note.dataset.kind = line?.kind ?? "";
+}
+
+function setNetworkNote(n: Note | null) {
+  networkNote = n;
+  drawControls();
+}
+
+// ---- Target field: the box shows what the lab has, and a line under it says what happened ----
+let targetDirty = false; // the student has typed since the lab last agreed with the box
+let targetNote: { kind: "ok" | "error" | "info"; text: string } | null = null; // result of their last action
+
+function setTargetNote(kind: "ok" | "error" | "info" | "", text = "") {
+  targetNote = kind ? { kind, text } : null;
+  drawControls();
+}
+
+function drawTarget(lab: LabStatus["lab"] | undefined, labReachable: boolean) {
+  const input = $<HTMLInputElement>("target");
+  const note = $("target-note");
+  const button = $<HTMLButtonElement>("target-button");
+  const str = (k: string) => (lab ? String(lab[k] ?? "") : "");
+  const current = str("targets");
+  const blocked = str("blocked_targets");
+  const shown = blocked || current; // a refused address is still what the student typed
+
+  // Follow the lab unless they're mid-edit, so the address never vanishes after Set.
+  if (!targetDirty && document.activeElement !== input) input.value = shown;
+
+  const typed = input.value.trim();
+  button.textContent = typed === "" && shown ? "Clear target" : "Set target";
+  button.disabled = !labReachable || (typed === shown && !(typed === "" && shown));
+
+  // What to say: a fresh error or confirmation first, then what the lab reports about the saved target.
+  let line: { kind: string; text: string } | null = targetNote;
+  if (!line && !targetDirty) {
+    if (blocked) line = { kind: "error", text: `${blocked} isn't a lab address, so it stays blocked.` };
+    else if (current && str("lost_targets")) line = { kind: "error", text: `${current} isn't answering. Is the machine running on HTB?` };
+    else if (current && str("live_targets")) line = { kind: "ok", text: `${current} is answering.` };
+    else if (current && str("state") === "connected") line = { kind: "info", text: `Target saved. Checking that ${current} answers…` };
+    else if (current) line = { kind: "info", text: "Target saved. Connect to the lab to reach it." };
+  }
+  note.textContent = line?.text ?? "";
+  note.dataset.kind = line?.kind ?? "";
+  if (targetNote?.kind === "error") input.setAttribute("aria-invalid", "true");
+  else input.removeAttribute("aria-invalid");
 }
 
 /** The one word in the top bar, visible from every tab. */
@@ -220,27 +284,80 @@ async function start() {
   // Design in a normal browser: `npm run dev`, then http://localhost:1420/?s=connecting etc.
   if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) await import("./dev/preview-mock");
 
-  terminal = setupTerminal($("term-host"), $("term-cover"));
+  // A terminal popped out into its own window loads this same page with ?popout=<shell id>.
+  const popout = new URLSearchParams(location.search).get("popout");
+  if (popout) return void setupPopout(Number(popout));
+
+  terminal = setupTerminal(() => $("tab-terminal").click());
   tools = setupTools(() => status?.lab?.["state"] === "connected");
   setupTabs();
 
+  // Adding a VPN file: the picker reads it here; the backend checks and saves it in the lab.
+  const picker = $<HTMLInputElement>("vpn-file");
+  $("add-vpn").addEventListener("click", () => picker.click());
+  picker.addEventListener("change", async () => {
+    const file = picker.files?.[0];
+    picker.value = ""; // picking the same file again should work
+    if (!file) return;
+    const content = await file.text();
+    run(async () => {
+      try {
+        const added = await invoke<VpnFile>("add_vpn_file", { name: file.name, content });
+        await loadFiles();
+        // Select the new file (only if it's listed, so the picker never shows blank).
+        if (files.some((f) => f.file === added.file)) $<HTMLSelectElement>("network").value = added.file;
+        setNetworkNote({ kind: "ok", text: `Added ${added.label}.` });
+      } catch (err) {
+        setNetworkNote({ kind: "error", text: String(err) });
+      }
+    });
+  });
+
   $("network-form").addEventListener("submit", (e) => {
     e.preventDefault();
+    if (files.length === 0) return void picker.click(); // no files yet: the button adds one
     const select = $<HTMLSelectElement>("network");
-    if ($("primary").textContent === "Disconnect") run(() => invoke("disconnect"));
-    else run(() => invoke("connect", { file: select.value }));
+    const verb = $("primary").textContent;
+    const name = labelFor(select.value);
+    setNetworkNote({ kind: "info", text: verb === "Disconnect" ? "Disconnecting…" : verb === "Switch network" ? `Switching to ${name}…` : `Connecting to ${name}…` });
+    run(async () => {
+      try {
+        await invoke(verb === "Disconnect" ? "disconnect" : "connect", { file: select.value });
+      } catch (err) {
+        setNetworkNote({ kind: "error", text: String(err) }); // right under the button, not at the bottom
+        return;
+      }
+      // Connecting: the lab's own status takes over. Disconnecting: say what it means.
+      setNetworkNote(verb === "Disconnect" ? { kind: "ok", text: "Disconnected. Everything stays blocked until you connect again." } : null);
+    });
   });
-  $("network").addEventListener("change", drawControls);
+  $("network").addEventListener("change", () => setNetworkNote(null));
 
   $("target-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const input = $<HTMLInputElement>("target");
+    const ip = input.value.trim();
+    targetNote = null;
+    setTargetNote("info", ip ? "Setting target…" : "Clearing target…");
     run(async () => {
-      await invoke("set_target", { ip: input.value });
-      input.value = "";
+      try {
+        await invoke("set_target", { ip });
+      } catch (err) {
+        setTargetNote("error", String(err)); // stays next to the box, and the typed address stays in it
+        return;
+      }
+      targetDirty = false;
+      input.value = ip;
+      if (ip) targetNote = null; // the lab's own status takes over from here
+      else setTargetNote("ok", "Target cleared. Nothing in the lab can be reached now.");
+      drawControls();
     });
   });
-  $("target").addEventListener("input", drawControls);
+  $("target").addEventListener("input", () => {
+    targetDirty = true;
+    targetNote = null;
+    drawControls();
+  });
 
   poll();
   loadFiles();

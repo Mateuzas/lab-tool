@@ -94,7 +94,7 @@ main {
   flex-direction: column;
 }
 .panel { flex: 1; display: grid; align-content: center; }
-.panel[hidden], .term-panel[hidden] { display: none; }
+.panel[hidden], .term-wrap[hidden] { display: none; }
 .block { width: 100%; }
 .tool .block { max-width: 62ch; }
 
@@ -194,6 +194,25 @@ h1 {
   gap: 10px;
   align-items: start;
 }
+/* A quiet text button under the network picker ("Add a VPN file"). */
+button.link {
+  grid-column: 1;
+  justify-self: start;
+  height: auto;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--cta);
+  font-weight: 700;
+  font-size: var(--s-small);
+}
+.strip button.link { min-width: 0; text-align: left; }
+button.link:hover { text-decoration: underline; }
+button.link[hidden] { display: none; }
+.strip-note { grid-column: 1 / -1; margin: 0; min-height: 1.45em; font-size: var(--s-small); color: var(--ink-soft); }
+.strip-note[data-kind="ok"] { color: var(--go); }
+.strip-note[data-kind="error"] { color: var(--stop); }
+.strip input[aria-invalid="true"] { border-color: var(--stop); }
 .strip button { min-width: clamp(140px, 10vw, 180px); }
 
 select,
@@ -265,6 +284,7 @@ button:not(:disabled):active { transform: translateY(1px); }
   overflow: hidden;
 }
 .term-host { position: absolute; inset: 14px 6px 10px 16px; }
+.term-host[hidden] { display: none; }
 .term-panel:focus-within { border-color: var(--cta); }
 .term-host .xterm-viewport { background-color: transparent !important; }
 .term-cover {
@@ -284,3 +304,25 @@ button:not(:disabled):active { transform: translateY(1px); }
 .term-cover button { border-color: #fff; color: #fff; }
 /* The panel's border shows focus; xterm's own box would double it. */
 .term-host :focus-visible { outline: none; }
+
+/* Terminal tabs: a bar above the black panel. The active tab is filled black so it reads as part of the panel. */
+.term-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.term-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.term-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-right: auto; }
+.term-tab { display: flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--field); }
+.term-tab button { height: 36px; border: 0; border-radius: 0; font-weight: 400; color: var(--ink-soft); }
+.term-tab button[aria-current="true"] { background: #000; color: #fff; font-weight: 700; }
+.term-tab .term-close { padding: 0 11px; font-size: 1.15em; line-height: 1; }
+.term-tab button:not([aria-current="true"]):hover { color: var(--ink); background: var(--paper); }
+.term-tab:has(button[aria-current="true"]) { border-color: #000; }
+.term-tab:has(button[aria-current="true"]) .term-close { background: #000; color: #c7c7c7; }
+.term-bar > button { height: 36px; padding: 0 14px; font-weight: 400; }
+#term-dock { display: none; }
+#term-error { margin-bottom: 10px; }
+
+/* Pop-out window: just the terminal and a way back. */
+body.popout .bar, body.popout main > .panel { display: none; }
+body.popout main { width: 100%; padding: 10px; }
+body.popout .term-bar { justify-content: flex-end; }
+body.popout .term-strip, body.popout #term-new, body.popout #term-pop { display: none; }
+body.popout #term-dock { display: block; }
