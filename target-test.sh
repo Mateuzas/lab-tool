@@ -18,7 +18,7 @@ echo "status: $code"
 [[ "$code" =~ ^[1-5][0-9][0-9]$ && "$code" != "000" ]] || { echo "FAIL: no HTTP response. Check PORT matches an open web port from nmap."; exit 1; }
 
 echo "== 3.6 tunnel-drop test"
-in_kali 'pkill openvpn'; sleep 3
+touch state/hold; in_kali 'pkill -x openvpn'; sleep 3
 if code=$(via_proxy); then
   echo "FAIL (Review Focus 2): got HTTP $code with the tunnel down. Traffic leaked via the host network."
   dropped=leak
@@ -28,7 +28,7 @@ else
 fi
 
 echo "== restore tunnel"
-in_kali 'openvpn --config "$(cat /tmp/ovpn.path)" --daemon --log /tmp/ovpn.log'
+rm -f state/hold
 for _ in $(seq 1 30); do in_kali 'ip -br addr show tun0' >/dev/null 2>&1 && break; sleep 1; done
 sleep 3
 code=$(via_proxy) || true

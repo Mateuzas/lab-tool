@@ -2,6 +2,7 @@
 # Container egress firewall (runs INSIDE the container as root).
 #   kill-switch.sh on <file.ovpn>   lab traffic only via tun0; eth0 only for DNS, the VPN server,
 #                                   and replies to the Mac's proxy connections. All else rejected.
+#   kill-switch.sh block            everything closed (used when the VPN server can't be resolved)
 #   kill-switch.sh off              open egress (maintenance, e.g. apt)
 #   kill-switch.sh status
 set -eu
@@ -43,11 +44,25 @@ case "${1:-status}" in
     ip6tables -A OUTPUT -j REJECT
     ip6tables -P OUTPUT DROP
     echo "kill-switch: on (VPN server $HOST -> $(echo $IPS | tr '\n' ' ')$PROTO/$PORT, DNS $DNS)" ;;
+  block)
+    # Fallback when the VPN server cannot be resolved: nothing leaves except DNS and proxy replies.
+    reset
+    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    DNS=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)
+    iptables -A OUTPUT -o eth0 -d "$DNS" -p udp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -o eth0 -d "$DNS" -p tcp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+    iptables -P OUTPUT DROP
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+    ip6tables -A OUTPUT -j REJECT
+    ip6tables -P OUTPUT DROP
+    echo "kill-switch: block (all egress closed)" ;;
   off)
     reset
     echo "kill-switch: off" ;;
   status)
     iptables -S OUTPUT; ip6tables -S OUTPUT ;;
   *)
-    echo "usage: kill-switch.sh on <file.ovpn> | off | status"; exit 1 ;;
+    echo "usage: kill-switch.sh on <file.ovpn> | block | off | status"; exit 1 ;;
 esac

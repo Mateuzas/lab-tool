@@ -186,3 +186,33 @@
   Per-target scope (only the spawned machine) is still to do in the tool server.
 - Known limits: VPN server IP is resolved once at switch-on (a server IP change needs a re-run
   of vpn-up). DNS queries still reach Docker's resolver (names leak, packets don't).
+
+## Step 2.2: Supervisor (2026-10-02)
+
+- `supervisor.sh` is the container's main process (`CMD`, run with `--init --restart unless-stopped`).
+  Every 3 s it ensures kill switch, proxy and VPN; health = ping to the HTB VPN gateway on tun0.
+  Writes `state/status.json` (state, plain-language message, server, lab IP, gateway ms, proxy,
+  kill switch, restarts) and `state/events.log`. The Mac side only writes `state/selected-vpn`.
+- States: disconnected / connecting / connected / reconnecting / offline / error.
+  Error messages are mapped from OpenVPN logs (AUTH_FAILED, bad file, TUN, DNS, TLS). Network
+  errors on a file that has worked before show "Reconnecting...", not "change your setup".
+- HTB's pushed ping-restart 120 overridden to ping 5 / ping-restart 20.
+- Kill switch gains `block` mode: used when disconnected or when the VPN server can't be
+  resolved, so a failure never leaves egress open.
+- `./vpn-up.sh starting` from a fresh container: connected in 5 s.
+- `supervisor-test.sh` (no target machine needed), all PASS:
+
+| Fault | Result |
+|---|---|
+| `docker restart` | connected again in 4 s, no script run |
+| openvpn `kill -9` | back in 6 s, restart counter 0 -> 1 |
+| microsocks killed | restarted within 5 s |
+| kill switch flushed | re-applied within 5 s |
+| UDP to VPN server dropped (Wi-Fi loss) | "Reconnecting..." after 35 s; connected 3 s after the network returned |
+| `vpn-up.sh off` | disconnected, egress fully blocked; reconnect works |
+| .ovpn with `up`/`script-security` | refused with a plain-language error |
+
+- First test version passed on a stale status.json (restart "0 s", counter 0 -> 0). Fixed: the test
+  only accepts states entered after the fault. Keep this pattern for future tests.
+- Tuning later: outage detection (35 s) could be faster; `kill-switch-test.sh` now uses
+  `state/hold` and must be re-run when a target is spawned again.

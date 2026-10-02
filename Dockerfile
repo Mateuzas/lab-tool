@@ -6,4 +6,5 @@ RUN apt-get update \
       tcpdump tshark iptables \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /lab
-CMD ["bash"]
+# The supervisor lives in the bind-mounted /lab during the spike; COPY it in for release.
+CMD ["bash", "/lab/supervisor.sh"]
