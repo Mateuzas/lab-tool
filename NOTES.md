@@ -21,3 +21,27 @@
   container-side kill switch (iptables egress allow-list) in the tool-server task.
 - microsocks is started with `setsid ... &` so it survives `docker exec` returning. Background
   processes do not survive a container restart.
+
+## Task 6 research (2026-10-02)
+
+- **6.1 HTB: disallowed for AI-run actions, allowed for AI explaining.** AUP (eff. 2026-04-01)
+  6.1: no "AI agent, large language model ... to directly access, interact with, or extract data
+  from any part of the Services". 6.2: no using challenges/solutions/hints/output to train,
+  evaluate or test AI. 8.2: no hints or spoilers for *active* content. 11.3(b): on assessments,
+  no automated system producing work for you.
+- **6.1 THM: same line, stated more clearly.** AUP 9.2 bans AI agents/LLMs accessing the
+  platform. 9.5: "Asking an AI assistant ... to explain a concept to you is fine, unless the room
+  ... tells you not to"; not fine: "letting it work through the platform for you".
+- **Design consequence:** Claude must never send traffic to a target itself. The student types and
+  runs every command; Claude only reads output and teaches. The tool server's job becomes
+  scope + logging + feeding output to the tutor, not executing on Claude's behalf. Burp MCP
+  tools that send requests (e.g. send_http_request, Repeater/Intruder) must be disabled;
+  read-only history access only. The tutor must not supply flags/answers for active machines
+  (hint ladder stops at approach for active content) and must refuse during exams.
+- **6.3 Docker Desktop:** free for personal use, education, non-commercial OSS, and companies
+  with <250 employees AND <$10M revenue. Larger companies need Pro/Team/Business. Windows
+  needs WSL2. Fine for a hobby/student audience; a blocker for corporate training sales.
+- **6.4 Network Extension:** not needed while the VPN runs inside the container.
+- **Burp MCP:** PortSwigger's official MCP Server extension (BApp Store) works on Community
+  Edition and ships a stdio proxy with auto-install for Claude Desktop.
+- **6.2 (who pays) and 6.5 (employment contract): Matas to decide/read.**
