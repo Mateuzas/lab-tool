@@ -54,3 +54,10 @@
 - `vpn-up.sh` (2.2-2.8, 3.3-3.4) and `target-test.sh <IP> [PORT]` (2.9, 3.5-3.6) script the
   manual steps. Tested: missing .ovpn -> refused; .ovpn with `up`/`script-security` hooks ->
   refused; malformed .ovpn -> openvpn log shown. Not yet tested against a real HTB server.
+
+## Location change (2026-10-02)
+
+- Repo moved from `~/kali-lab` to `~/Desktop/Projects/kali-lab`. Wherever the plan says
+  `~/kali-lab`, read this path. Container recreated with `-v ~/Desktop/Projects/kali-lab:/lab`.
+- Packages now come from `Dockerfile` (image `kali-lab:spike`) instead of a manual
+  `apt install`, so recreating the container keeps them. Same run flags as step 1.4.

@@ -9,7 +9,7 @@ docker start kali-lab >/dev/null
 
 echo "== 2.2 exactly one VPN file"
 count=$(in_kali 'ls /lab/*.ovpn 2>/dev/null | wc -l')
-[ "$count" -eq 1 ] || { echo "FAIL: expected 1 .ovpn in ~/kali-lab, found $count"; exit 1; }
+[ "$count" -eq 1 ] || { echo "FAIL: expected 1 .ovpn in ~/Desktop/Projects/kali-lab, found $count"; exit 1; }
 
 echo "== 2.3 hook check"
 if in_kali "grep -nE '^(script-security|up|down|route-up|route-pre-down|plugin|tls-verify|auth-user-pass-verify)' /lab/*.ovpn"; then
