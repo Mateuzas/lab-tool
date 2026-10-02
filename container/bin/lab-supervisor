@@ -21,6 +21,8 @@ mkdir -p "$STATE"
 
 vpn_pid=""; current=""; vpn_started=0; restarts=0; gw_fails=0; ever_connected=""
 scope_sig=""; scope_ok=""; scope_bad=""
+declare -A tgt_seen tgt_fails   # per target: answered a ping at least once / consecutive misses
+target_lost=""                  # targets that answered before and have stopped (machine off or tunnel cut)
 state=starting; message="Starting the lab"; state_since=$(date +%s); gateway_ms=""; refused=""
 
 log() { echo "$(date -u +%FT%TZ) $*" >> "$EVENTS"; }
@@ -41,9 +43,9 @@ write_status() {
   elif iptables -S OUTPUT 2>/dev/null | grep -q REJECT; then ks=block
   else ks=off; fi
   [ -n "$current" ] && server=$(awk '/^remote /{print $2; exit}' "$VPN_DIR/$current" 2>/dev/null)
-  printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","targets":"%s","blocked_targets":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
+  printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","targets":"%s","blocked_targets":"%s","lost_targets":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
     "$state" "$message" "$current" "$server" "$lab_ip" "$gateway_ms" "$proxy" "$ks" \
-    "$scope_ok" "$scope_bad" "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+    "$scope_ok" "$scope_bad" "$target_lost" "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
 }
 
 stop_vpn() {
@@ -97,6 +99,44 @@ ensure_scope() {
   fi
 }
 
+# Is the machine alive? Ping first; many machines block ping, so also try common TCP ports. A
+# connection that opens or is actively refused both prove a host answered; only silence doesn't.
+host_alive() {
+  local ip=$1 p t pids=()
+  ping -c 1 -W 1 "$ip" >/dev/null 2>&1 && return 0
+  for p in 22 80 443 445 21 3389 8080; do
+    ( timeout 1 bash -c "exec 3<>/dev/tcp/$ip/$p" 2>/dev/null; [ $? -ne 124 ] ) &
+    pids+=($!)
+  done
+  for t in "${pids[@]}"; do wait "$t" && return 0; done   # only our probes: never openvpn/microsocks
+  return 1
+}
+
+# Is each target answering? A target that has answered is lost after 3 misses in a row (~10 s);
+# one that never answered after 10 (~30 s: machine not started, expired or wrong IP). One answer
+# clears it. Speaking in "answering", not "up": a hardened box can stay silent and look the same.
+check_targets() {
+  local ip lost="" known=" $scope_ok " limit
+  for ip in "${!tgt_seen[@]}" "${!tgt_fails[@]}"; do   # forget targets the student removed
+    case "$known" in *" $ip "*) ;; *) unset "tgt_seen[$ip]" "tgt_fails[$ip]" ;; esac
+  done
+  for ip in $scope_ok; do
+    if host_alive "$ip"; then
+      if [ -z "${tgt_seen[$ip]:-}" ]; then log "target $ip is answering"
+      elif [ "${tgt_fails[$ip]:-0}" -ge 3 ]; then log "target $ip is back"; fi
+      tgt_seen[$ip]=1; tgt_fails[$ip]=0
+    else
+      tgt_fails[$ip]=$(( ${tgt_fails[$ip]:-0} + 1 ))
+      limit=10; [ -n "${tgt_seen[$ip]:-}" ] && limit=3
+      if [ "${tgt_fails[$ip]}" -ge "$limit" ]; then
+        [ "${tgt_fails[$ip]}" -eq "$limit" ] && log "target $ip is not answering"
+        lost="$lost $ip"
+      fi
+    fi
+  done
+  target_lost=${lost# }
+}
+
 ensure_proxy() {
   local eth0
   eth0=$(ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1)
@@ -130,6 +170,7 @@ while true; do
 
   if [ "$selected" != "$current" ]; then
     stop_vpn; current=$selected; refused=""; restarts=0; ever_connected=""
+    tgt_seen=(); tgt_fails=(); target_lost=""
     lab-kill-switch block >/dev/null 2>&1
     if [ -n "$current" ] && [ -f "$VPN_DIR/$current" ] && grep -qE "$HOOKS" "$VPN_DIR/$current"; then
       refused=yes
@@ -161,8 +202,9 @@ while true; do
     if [ -n "$gw" ]; then
       ensure_scope "$gw"
       gateway_ms=$(ping -c 1 -W 2 "$gw" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p')
+      [ -n "$gateway_ms" ] && check_targets || target_lost=""   # no tunnel, no verdict on the machine
     else
-      gateway_ms=""
+      gateway_ms=""; target_lost=""
     fi
 
     if [ -n "$gateway_ms" ]; then
@@ -171,6 +213,8 @@ while true; do
         set_state connected "Connected. $scope_bad is not a lab address, so it stays blocked."
       elif [ -z "$scope_ok" ]; then
         set_state connected "Connected. Pick the machine you spawned to start."
+      elif [ -n "$target_lost" ]; then
+        set_state connected "Connected, but $target_lost isn't answering. Is the machine running on HTB?"
       else
         set_state connected "Connected. Target: $scope_ok"
       fi

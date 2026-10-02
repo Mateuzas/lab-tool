@@ -3,6 +3,8 @@ import "@fontsource/atkinson-hyperlegible-next/700.css";
 import "@fontsource/atkinson-hyperlegible-mono/400.css";
 import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
+import { setupTerminal } from "./terminal";
+import { setupTools } from "./tools";
 
 /** Mirrors lab::LabStatus in src-tauri/src/lab.rs. */
 interface LabStatus {
@@ -24,6 +26,8 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 let status: LabStatus | null = null;
 let files: VpnFile[] = [];
 let pending = false; // a connect/disconnect is in flight
+let terminal: ReturnType<typeof setupTerminal> | null = null;
+let tools: ReturnType<typeof setupTools> | null = null;
 
 // All lab data is set with textContent, never as HTML.
 function setText(id: string, text: string) {
@@ -60,6 +64,10 @@ function drawRoute(s: LabStatus) {
   const state = str("state");
   const stale = s.title === "Lab not responding";
 
+  // This Mac's address inside the lab, once the VPN gives it one.
+  const labIp = str("lab_ip");
+  hop("mac", "on", labIp || "Ready", !!labIp);
+
   const ks = str("kill_switch");
   hop("guard", stale ? "broken" : ks === "off" ? "broken" : "on",
     stale ? "No answer" : ks === "on" ? "On" : ks === "block" ? "Blocking all" : "Off");
@@ -79,6 +87,7 @@ function drawRoute(s: LabStatus) {
   const targets = str("targets");
   const blocked = str("blocked_targets");
   if (blocked) hop("target", "broken", "Blocked");
+  else if (targets && str("lost_targets") && vpnState === "on") hop("target", "broken", "Not answering");
   else if (targets) hop("target", vpnState === "on" ? "on" : "off", targets, true);
   else hop("target", "off", "Not set");
 }
@@ -119,23 +128,26 @@ function drawControls() {
   else primary.textContent = "Disconnect";
   primary.disabled = !labReachable || pending || files.length === 0;
 
-  const ip = lab ? String(lab["lab_ip"] ?? "") : "";
-  $("meta").hidden = !ip;
-  setText("lab-ip", ip);
-
   const tInput = $<HTMLInputElement>("target");
   const tCurrent = lab ? String(lab["targets"] ?? "") : "";
   $<HTMLButtonElement>("target-button").textContent =
     tInput.value.trim() === "" && tCurrent ? "Clear target" : "Set target";
 }
 
+/** The one word in the top bar, visible from every tab. */
+const CHIP: Record<LabStatus["level"], string> = { ok: "Connected", working: "Connecting", problem: "Needs attention", off: "Not connected" };
+
 function draw() {
   if (!status) return;
+  $("chip").dataset.level = status.level;
+  setText("chip-text", status.title === "Reconnecting" ? "Reconnecting" : CHIP[status.level]);
   $("status").dataset.level = status.level;
   setText("title", status.title);
   setText("message", status.message);
   drawRoute(status);
   drawControls();
+  terminal?.setGate(status.lab ? "ready" : "no-lab");
+  tools?.redraw();
 }
 
 function showError(msg: string) {
@@ -181,9 +193,36 @@ async function run(action: () => Promise<unknown>) {
   }
 }
 
+/** Lab / Terminal tabs. The terminal stays mounted while hidden, so the shell keeps running. */
+function setupTabs() {
+  const tabs = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+  const select = (tab: HTMLButtonElement, focus = false) => {
+    for (const t of tabs) {
+      const on = t === tab;
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on ? 0 : -1;
+      $(t.getAttribute("aria-controls")!).hidden = !on;
+    }
+    if (focus) tab.focus();
+    if (tab.id === "tab-terminal") terminal?.focus();
+  };
+  for (const t of tabs) t.addEventListener("click", () => select(t));
+  $("tab-lab").parentElement!.addEventListener("keydown", (e) => {
+    const i = tabs.findIndex((t) => t.getAttribute("aria-selected") === "true");
+    const next = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? tabs.length - 1 : null;
+    if (next === null) return;
+    e.preventDefault();
+    select(tabs[(next + tabs.length) % tabs.length], true);
+  });
+}
+
 async function start() {
   // Design in a normal browser: `npm run dev`, then http://localhost:1420/?s=connecting etc.
   if (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)) await import("./dev/preview-mock");
+
+  terminal = setupTerminal($("term-host"), $("term-cover"));
+  tools = setupTools(() => status?.lab?.["state"] === "connected");
+  setupTabs();
 
   $("network-form").addEventListener("submit", (e) => {
     e.preventDefault();

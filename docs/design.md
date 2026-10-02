@@ -145,7 +145,7 @@ is CSS injection (can restyle, cannot run code). Revisit if xterm adds nonce sup
   Black, too faint for meaningful graphics; raised `--rule` to `#606064` (3:1).
 - Terminal: backend done (`app/src-tauri/src/term.rs`: `term_open(cols, rows, onEvent)`,
   `term_write(id, data)`, `term_resize(id, cols, rows)`, `term_close(id)`; events
-  `{event:"data", data:[bytes]}` / `{event:"exit"}`). Frontend (xterm.js) not written yet.
+  `{event:"data", data:[bytes]}` / `{event:"exit"}`). Frontend: see Pass 4.
 
 ## Pass 3 (2026-10-02): responsive layout
 
@@ -163,3 +163,81 @@ Problem: at full screen everything sat in the top-left corner (fixed 680 px colu
   route pins and control height (`--control-h`) now scale with `clamp()` too. Row labels
   drifted when a row grew taller (multi-line hint); labels and hint now align to the first
   control line instead of the row's centre.
+
+## Pass 4 (2026-10-02): terminal frontend
+
+- `app/src/terminal.ts` (xterm.js + fit addon over the `term_*` commands). Opens a shell as soon
+  as the lab container is reachable (no extra click); when the lab goes away the panel is covered
+  with "The terminal opens when the lab is running."; when the shell exits it says "This terminal
+  has ended." with an "Open a new terminal" button.
+- Panel is `.term-panel` (not `.terminal`: xterm adds that class to its own element and the
+  styles doubled up). Surface Dark, hairline edge, border turns purple while focused (the only
+  focus indicator; xterm's inner outline is removed so it isn't doubled).
+- Terminal colours: Soft White on Surface Dark, Neon Pink cursor, purple selection; ANSI blues
+  lifted so the Kali prompt is readable.
+- CSP changed as planned above (`style-src 'unsafe-inline'`, `dangerousDisableAssetCspModification`).
+- Preview mock has a fake shell (echo, `ls`, `exit`) so the UI can be designed in a browser.
+- Not yet verified: inside the real Tauri window against the live container (CSP, Docker exec
+  resize, paste). Run `make app-dev` with the lab up.
+
+## Pass 5 (2026-10-02): tabs + black/white terminal
+
+- Tabs **Lab** (route + controls) and **Terminal**, under a status headline that is always
+  visible so "is it safe?" is answered on both. Plain-word tabs on a hairline, purple underline
+  on the active one; arrow keys / Home / End switch tabs. The terminal stays mounted while
+  hidden, so the shell keeps running when you switch to Lab.
+- Terminal is plain black on white text, white cursor and selection (client request, overrides
+  the Surface Dark panel from Pass 4). ANSI colours stay (lifted) so the Kali prompt reads.
+
+## Pass 4 (2026-10-02): Argo CD palette
+
+Client direction: Argo CD's colours. Source: `argoproj/argo-ui` `src/styles/config.scss`.
+Argo CD's signature is light grey content with teal actions; its status colours (Healthy green,
+Progressing blue, Degraded red, Missing grey) map directly onto the route's hop states.
+
+| Token | Argo variable | Value | Role |
+|---|---|---|---|
+| `--paper` | `$argo-color-gray-2` | `#EFF3F5` | window |
+| `--field` | `$white-color` | `#FFFFFF` | fields |
+| `--ink` | `$argo-color-gray-8` | `#363C4A` | text |
+| `--ink-soft` | `$argo-color-gray-6` | `#6D7F8B` | secondary text |
+| `--rule` | `$argo-color-gray-5` | `#8FA4B1` | borders, idle route (Missing/Unknown) |
+| `--go` | `$argo-success-color-dark` | `#3F946D` | connected (Healthy) |
+| `--wait` | `$argo-running-color-dark` | `#378398` | connecting (Progressing), flowing |
+| `--stop` | `$argo-failed-color-dark` | `#C04B4F` | broken (Degraded), alerts |
+| `--cta` | `$argo-color-teal-7` | `#006F8A` | main button (white text) |
+
+Deviation: Argo's bright status colours (#18BE94, #0DADEA, #E96D76) are ~2-2.5:1 on the light
+background, below 3:1 for meaningful graphics; Argo's own `-dark` variants are used instead.
+Teal-7 rather than teal-6 for the button so white text passes 4.5:1.
+
+**Terminal (when built): plain black and white**, background `#000000` (`$argo-color-gray-9`),
+text `#FFFFFF`, not themed with the app palette (client decision).
+
+## Pass 5 (2026-10-02): minimal home + Burp and Wireshark tabs
+
+Problem (client): the home screen felt all over the place: headline, tabs, route, two labelled
+forms and an IP line stacked with no single focal point; the tab hairline still used a
+dark-palette colour (invisible on Argo's light background).
+
+```
+ Lab   Terminal   Burp   Wireshark                         ● Connected
+ ───────────────────────────────────────────────────────────────────────
+        Connected to the lab
+        You can reach 10.129.15.9. Everything else is blocked.
+        ●━━━━━━●━━━━━━●━━━━━━●━━━━━━●
+        [ Starting Point (EU 2) v ][ Disconnect ]  [ 10.129.15.9 ][ Set ]
+```
+
+- One top bar on every tab: tabs left, a status dot + one word right (visible from any tab).
+- Lab tab = one centred block (vertically too): status, route, one control strip. Visible
+  field labels removed (fields keep aria-labels + placeholders); lab IP moves onto the route.
+- Burp / Wireshark tabs share one pattern: what the tool is for (one sentence), its state, one
+  button. Not installed -> "Get Burp/Wireshark" opens the official download page.
+- Terminal stays plain black and white (pass 4 decision).
+- Built (2026-10-02): top bar with tabs + status chip; Lab tab as one centred block with a
+  label-free control strip; lab IP shown on the route under "This Mac"; Burp and Wireshark tabs
+  (`app/src/tools.ts`, backend `app/src-tauri/src/tools.rs`). Self-critique: a disabled
+  "Watching" button looked broken, so the button is hidden while Wireshark runs and the green
+  state line carries the message. Checked at 1470 and 640 px, all tool states (missing, ready,
+  running).

@@ -1,16 +1,18 @@
-/* Lab Tool. Design record: docs/design.md (pass 1). */
+/* Lab Tool. Design record: docs/design.md (palette: pass 4, layout: pass 5). */
 
 :root {
-  /* Client palette, dark only for now (docs/design.md, pass 2). */
-  --paper: #0b090c;      /* Deep Black: window (60%) */
-  --field: #161219;      /* Surface Dark: fields, panels (60%) */
-  --ink: #f8f9fa;        /* Soft White: text (30%) */
-  --ink-soft: #9e9ea0;   /* Soft White at ~62% on Deep Black */
-  --rule: #606064;       /* Soft White at ~33%: borders, idle route (3:1 on Deep Black) */
-  --go: #8a2be2;         /* Vibrant Purple: connected (large text and graphics only) */
-  --wait: #8a2be2;       /* connecting: same purple, told apart by the flowing pattern */
-  --stop: #ff2a85;       /* Neon Pink: alerts, broken hops */
-  --cta: #ff2a85;        /* Neon Pink: the focal button */
+  /* Argo CD palette (argo-ui config.scss), docs/design.md pass 4. */
+  --paper: #eff3f5;      /* gray-2: window */
+  --field: #ffffff;      /* white: fields, top bar */
+  --hair: #dee6eb;       /* gray-3: hairlines */
+  --ink: #363c4a;        /* gray-8: text */
+  --ink-soft: #6d7f8b;   /* gray-6: secondary text */
+  --rule: #8fa4b1;       /* gray-5: borders, idle route (Missing/Unknown) */
+  --go: #3f946d;         /* success-dark: connected (Healthy) */
+  --wait: #378398;       /* running-dark: connecting (Progressing) */
+  --stop: #c04b4f;       /* failed-dark: broken (Degraded), alerts */
+  --cta: #006f8a;        /* teal-7: main button, active tab */
+  --cta-text: #ffffff;
 
   --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
   --mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
@@ -19,12 +21,13 @@
   --s-lead: clamp(17px, 0.4vw + 13px, 21px);
   --s-head: clamp(30px, 1.6vw + 18px, 50px);
   --gutter: clamp(20px, 5vw, 72px);
+  --column: min(1120px, 100% - 2 * var(--gutter));
   --pin: clamp(14px, 0.4vw + 9px, 18px);
   --control-h: clamp(40px, 0.8vw + 30px, 50px);
   --line: 3px;
   --hop-gap: 20px;
 
-  color-scheme: dark;
+  color-scheme: light;
   font: 400 var(--s-body) / 1.45 var(--sans);
   color: var(--ink);
   background: var(--paper);
@@ -32,18 +35,71 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; }
-/* A centred column that grows with the window; text stays left-aligned inside it. */
-main {
-  width: min(1120px, 100% - 2 * var(--gutter));
-  margin-inline: auto;
-  padding-block: clamp(28px, 7vh, 88px) 40px;
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .ip { font-family: var(--mono); letter-spacing: 0; }
 
+/* ---------- Top bar: tabs left, connection state right (same on every tab) ---------- */
+.bar { background: var(--field); border-bottom: 1px solid var(--hair); }
+.bar-inner {
+  width: var(--column);
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.tabs { display: flex; gap: clamp(18px, 2vw, 32px); }
+.tabs button {
+  height: auto;
+  padding: 16px 2px 13px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-soft);
+}
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--cta); }
+.tabs button:not([aria-selected="true"]):hover { color: var(--ink); }
+
+.chip, .tool-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--s-small);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--rule); flex: none; }
+[data-level="ok"] > .dot { background: var(--go); }
+[data-level="working"] > .dot { background: var(--wait); }
+[data-level="problem"] > .dot { background: var(--stop); }
+.chip[data-level="ok"] { color: var(--go); }
+.chip[data-level="problem"] { color: var(--stop); }
+
+/* ---------- Panels: one centred block in the space under the bar ---------- */
+main {
+  flex: 1;
+  width: var(--column);
+  margin-inline: auto;
+  padding-block: clamp(20px, 4vh, 48px);
+  display: flex;
+  flex-direction: column;
+}
+.panel { flex: 1; display: grid; align-content: center; }
+.panel[hidden], .term-panel[hidden] { display: none; }
+.block { width: 100%; }
+.tool .block { max-width: 62ch; }
+
 /* Status: the loudest text on screen, coloured only by meaning. */
-.status h1 {
+h1 {
   margin: 0;
   font-size: var(--s-head);
   font-weight: 700;
@@ -53,17 +109,18 @@ main {
 .status[data-level="ok"] h1 { color: var(--go); }
 .status[data-level="working"] h1 { color: var(--wait); }
 .status[data-level="problem"] h1 { color: var(--stop); }
-.status p {
+.status p, .lead {
   margin: 8px 0 0;
   max-width: 60ch;
   font-size: var(--s-lead);
   color: var(--ink-soft);
 }
 
-/* The route. Each hop draws the line segment that leads into it, in that hop's state. */
+/* ---------- The route ---------- */
+/* Each hop draws the line segment that leads into it, in that hop's state. */
 .route {
   list-style: none;
-  margin: clamp(32px, 5vh, 64px) 0 clamp(36px, 6vh, 72px);
+  margin: clamp(32px, 6vh, 64px) 0 clamp(32px, 6vh, 64px);
   padding: 0;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -124,23 +181,20 @@ main {
   .route [data-state="wait"]::before { animation: none; }
 }
 
-/* Controls: label column, field, action. */
-.controls { display: grid; gap: 14px; }
-/* Wide windows: the two control rows side by side; error and lab IP span both. */
-@media (min-width: 1000px) {
-  .controls { grid-template-columns: 1fr 1fr; column-gap: clamp(32px, 4vw, 64px); align-items: start; }
-  .controls > .error,
-  .controls > .meta { grid-column: 1 / -1; }
-}
+/* ---------- Controls: one strip, field + action, no visible labels ---------- */
+.controls { display: grid; gap: 12px; }
 .controls[hidden] { display: none; }
-.row {
+@media (min-width: 900px) {
+  .controls { grid-template-columns: 1fr 1fr; column-gap: clamp(24px, 3vw, 48px); align-items: start; }
+  .controls > .error { grid-column: 1 / -1; }
+}
+.strip {
   display: grid;
-  grid-template-columns: clamp(108px, 7vw, 140px) 1fr clamp(150px, 10vw, 190px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: start;
 }
-.row label { padding-top: calc((var(--control-h) - 1.45em) / 2); color: var(--ink-soft); }
-.field { min-width: 0; }
+.strip button { min-width: clamp(140px, 10vw, 180px); }
 
 select,
 input,
@@ -168,23 +222,24 @@ button {
   font-weight: 700;
   cursor: pointer;
 }
-button.primary { background: var(--cta); border-color: var(--cta); color: var(--paper); }
+button.primary { background: var(--cta); border-color: var(--cta); color: var(--cta-text); }
 button:disabled { opacity: 0.4; cursor: default; }
 button:not(:disabled):active { transform: translateY(1px); }
 
-:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--cta); outline-offset: 2px; }
 
 .hint { margin: 0; padding-top: calc((var(--control-h) - 1.45em) / 2); max-width: 46ch; color: var(--ink-soft); }
 .error { margin: 0; color: var(--stop); max-width: 60ch; }
-.meta { margin: 10px 0 0; font-size: var(--s-small); color: var(--ink-soft); }
-.meta .ip { color: var(--ink); margin-left: 6px; }
 
-/* Narrow windows: controls stack below 720 px, the route turns vertical below 600 px. */
-@media (max-width: 720px) {
-  .row { grid-template-columns: 1fr; gap: 6px; }
-  .row label { padding-top: 0; }
-}
+/* ---------- Tool tabs (Burp, Wireshark): sentence, state, one button ---------- */
+.tool .tool-state { margin: clamp(28px, 5vh, 48px) 0 16px; font-size: var(--s-body); }
+.tool-state[data-level="ok"] { color: var(--go); }
+.tool .primary { min-width: 200px; }
+.tool .primary[hidden] { display: none; }
+.tip { margin: 16px 0 0; font-size: var(--s-small); color: var(--ink-soft); max-width: 56ch; }
+.tip[hidden] { display: none; }
 
+/* ---------- Narrow windows ---------- */
 @media (max-width: 600px) {
   .route { grid-template-columns: 1fr; row-gap: 18px; column-gap: 0; }
   .route li { padding: 0 0 0 calc(var(--pin) + 14px); }
@@ -194,4 +249,38 @@ button:not(:disabled):active { transform: translateY(1px); }
     width: var(--line);
     height: 14px;
   }
+  .strip { grid-template-columns: 1fr; }
+  .bar-inner { flex-wrap: wrap; row-gap: 0; }
+  .chip { padding-bottom: 10px; }
 }
+
+/* ---------- Terminal: plain black and white (pass 4); quiet so the route stays the hero ---------- */
+.term-panel {
+  position: relative;
+  flex: 1;
+  min-height: 240px;
+  background: #000;
+  border: 1px solid #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.term-host { position: absolute; inset: 14px 6px 10px 16px; }
+.term-panel:focus-within { border-color: var(--cta); }
+.term-host .xterm-viewport { background-color: transparent !important; }
+.term-cover {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px;
+  background: #000;
+  color: #fff;
+  text-align: center;
+}
+.term-cover[hidden] { display: none; }
+.term-cover p { margin: 0; max-width: 46ch; color: #c7c7c7; }
+.term-cover button { border-color: #fff; color: #fff; }
+/* The panel's border shows focus; xterm's own box would double it. */
+.term-host :focus-visible { outline: none; }

@@ -1,8 +1,9 @@
 mod lab;
 mod term;
+mod tools;
 
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 /// Current lab status for the UI. Never fails: problems come back as a plain-language status.
 #[tauri::command]
@@ -56,13 +57,41 @@ async fn term_close(id: u32, terms: State<'_, term::Terminals>) -> Result<(), St
     Ok(())
 }
 
+#[tauri::command]
+fn burp_status(tools: State<'_, tools::Tools>) -> tools::ToolStatus {
+    tools.burp_status()
+}
+
+#[tauri::command]
+fn open_burp(app: AppHandle, tools: State<'_, tools::Tools>) -> Result<(), String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    tools.open_burp(dir)
+}
+
+#[tauri::command]
+fn wireshark_status(tools: State<'_, tools::Tools>) -> tools::ToolStatus {
+    tools.wireshark_status()
+}
+
+#[tauri::command]
+async fn watch_traffic(tools: State<'_, tools::Tools>) -> Result<(), String> {
+    tools.watch_traffic().await
+}
+
+#[tauri::command]
+fn get_tool(tool: String) -> Result<(), String> {
+    tools::open_download(&tool)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(term::Terminals::default())
+        .manage(tools::Tools::default())
         .invoke_handler(tauri::generate_handler![
             lab_status, vpn_files, connect, disconnect, set_target,
-            term_open, term_write, term_resize, term_close
+            term_open, term_write, term_resize, term_close,
+            burp_status, open_burp, wireshark_status, watch_traffic, get_tool
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

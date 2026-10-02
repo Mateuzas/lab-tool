@@ -105,6 +105,8 @@ pub fn interpret(status: Value, now: i64) -> LabStatus {
 fn connected_message(targets: &str, supervisor: &str) -> String {
     if supervisor.contains("stays blocked") {
         supervisor.trim_start_matches("Connected. ").to_string()
+    } else if supervisor.contains("isn't answering") {
+        supervisor.to_string()
     } else if targets.is_empty() {
         "Enter the IP of the machine you spawned on HTB to start.".to_string()
     } else {
@@ -275,6 +277,9 @@ mod tests {
         let refused = json!({ "state": "connected", "blocked_targets": "8.8.8.8",
             "message": "Connected. 8.8.8.8 is not a lab address, so it stays blocked.", "updated": 1 });
         assert_eq!(interpret(refused, 1).message, "8.8.8.8 is not a lab address, so it stays blocked.");
+        let lost = json!({ "state": "connected", "targets": "10.129.15.9", "lost_targets": "10.129.15.9",
+            "message": "Connected, but 10.129.15.9 isn't answering. Is the machine running on HTB?", "updated": 1 });
+        assert!(interpret(lost, 1).message.contains("isn't answering"));
     }
 
     #[test]

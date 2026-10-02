@@ -11,7 +11,7 @@ const files = [
 const lab = (o: Record<string, unknown>) => ({
   state: "connected", message: "Connected. Target: 10.129.15.9", vpn_file: files[0].file,
   server: "edge-eu-starting-point-2-dhcp.hackthebox.eu", lab_ip: "10.10.15.248", gateway_ms: "88.8",
-  proxy: "up", kill_switch: "on", targets: "10.129.15.9", blocked_targets: "", vpn_restarts: 0,
+  proxy: "up", kill_switch: "on", targets: "10.129.15.9", blocked_targets: "", lost_targets: "", vpn_restarts: 0,
   state_since: now(), updated: now(), ...o,
 });
 
@@ -29,6 +29,9 @@ const scenarios: Record<string, { status: unknown; files?: unknown[] }> = {
     lab: lab({ state: "error", gateway_ms: "", lab_ip: "" }) } },
   blocked: { status: { level: "ok", title: "Connected to the lab", message: "8.8.8.8 is not a lab address, so it stays blocked.",
     lab: lab({ targets: "", blocked_targets: "8.8.8.8" }) } },
+  "target-lost": { status: { level: "ok", title: "Connected to the lab",
+    message: "Connected, but 10.129.15.9 isn't answering. Is the machine running on HTB?",
+    lab: lab({ lost_targets: "10.129.15.9", message: "Connected, but 10.129.15.9 isn't answering. Is the machine running on HTB?" }) } },
   disconnected: { status: { level: "off", title: "Not connected", message: "Choose a lab to connect to.",
     lab: lab({ state: "disconnected", vpn_file: "", gateway_ms: "", lab_ip: "", kill_switch: "block", targets: "" }) } },
   "no-files": { files: [], status: { level: "off", title: "Not connected", message: "Choose a lab to connect to.",
@@ -40,10 +43,42 @@ const scenarios: Record<string, { status: unknown; files?: unknown[] }> = {
 
 const pick = scenarios[new URLSearchParams(location.search).get("s") ?? "connected"] ?? scenarios.connected;
 
+// Fake shell for the terminal: echoes typed text and answers a few commands.
+const callbacks = new Map<number, (m: unknown) => void>();
+let nextCb = 1;
+let shell: ((text: string) => void) | null = null;
+const PROMPT = "\r\n\x1b[32m┌──(\x1b[1;34mroot㉿kali\x1b[0;32m)-[\x1b[0m/lab\x1b[32m]\r\n└─\x1b[1;34m#\x1b[0m ";
+
+// Burp / Wireshark tabs: ?tools=missing | ready | running
+const toolMode = new URLSearchParams(location.search).get("tools") ?? "ready";
+const toolState = { installed: toolMode !== "missing", running: toolMode === "running" };
+
 (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
+  transformCallback: (cb: (m: unknown) => void) => { const id = nextCb++; callbacks.set(id, cb); return id; },
+  unregisterCallback: (id: number) => callbacks.delete(id),
   invoke: async (cmd: string, args: Record<string, string>) => {
     if (cmd === "lab_status") return pick.status;
     if (cmd === "vpn_files") return pick.files ?? files;
+    if (cmd === "term_open") {
+      const cb = callbacks.get((args.onEvent as unknown as { id: number }).id)!;
+      let index = 0, line = "";
+      const send = (text: string) => cb({ index: index++, message: { event: "data", data: [...new TextEncoder().encode(text)] } });
+      send(PROMPT.slice(2));
+      shell = (text) => {
+        for (const ch of text) {
+          if (ch === "\r") {
+            if (line.trim() === "exit") { cb({ index: index++, message: { event: "exit" } }); return; }
+            send(line.trim() === "ls" ? "\r\nnotes.txt  captures\r\n" : line.trim() ? `\r\nbash: ${line.trim().split(" ")[0]}: command not found\r\n` : "\r\n");
+            line = ""; send(PROMPT.slice(2));
+          } else if (ch === "\x7f") { if (line) { line = line.slice(0, -1); send("\b \b"); } }
+          else { line += ch; send(ch); }
+        }
+      };
+      return 1;
+    }
+    if (cmd === "term_write") { shell?.(args.data); return null; }
+    if (cmd === "burp_status" || cmd === "wireshark_status") return toolState;
+    if (["open_burp", "watch_traffic", "get_tool"].includes(cmd)) return null;
     if (cmd === "set_target" && args.ip && !/^\d{1,3}(\.\d{1,3}){3}$/.test(args.ip.trim()))
       throw `"${args.ip}" isn't an IP address. Copy it from the machine's page on HTB.`;
     return null;
