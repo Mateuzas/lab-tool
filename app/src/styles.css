@@ -14,11 +14,13 @@
 
   --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
   --mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
-  --s-small: 13px;
-  --s-body: 15px;
-  --s-lead: 18px;
-  --s-head: 34px;
-  --pin: 14px;
+  --s-small: clamp(13px, 0.25vw + 10px, 16px);
+  --s-body: clamp(15px, 0.3vw + 11.5px, 18px);
+  --s-lead: clamp(17px, 0.4vw + 13px, 21px);
+  --s-head: clamp(30px, 1.6vw + 18px, 50px);
+  --gutter: clamp(20px, 5vw, 72px);
+  --pin: clamp(14px, 0.4vw + 9px, 18px);
+  --control-h: clamp(40px, 0.8vw + 30px, 50px);
   --line: 3px;
   --hop-gap: 20px;
 
@@ -31,7 +33,12 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
-main { max-width: 680px; padding: 44px 40px 40px; }
+/* A centred column that grows with the window; text stays left-aligned inside it. */
+main {
+  width: min(1120px, 100% - 2 * var(--gutter));
+  margin-inline: auto;
+  padding-block: clamp(28px, 7vh, 88px) 40px;
+}
 
 .ip { font-family: var(--mono); letter-spacing: 0; }
 
@@ -56,7 +63,7 @@ main { max-width: 680px; padding: 44px 40px 40px; }
 /* The route. Each hop draws the line segment that leads into it, in that hop's state. */
 .route {
   list-style: none;
-  margin: 44px 0 48px;
+  margin: clamp(32px, 5vh, 64px) 0 clamp(36px, 6vh, 72px);
   padding: 0;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -119,14 +126,20 @@ main { max-width: 680px; padding: 44px 40px 40px; }
 
 /* Controls: label column, field, action. */
 .controls { display: grid; gap: 14px; }
+/* Wide windows: the two control rows side by side; error and lab IP span both. */
+@media (min-width: 1000px) {
+  .controls { grid-template-columns: 1fr 1fr; column-gap: clamp(32px, 4vw, 64px); align-items: start; }
+  .controls > .error,
+  .controls > .meta { grid-column: 1 / -1; }
+}
 .controls[hidden] { display: none; }
 .row {
   display: grid;
-  grid-template-columns: 108px 1fr 150px;
+  grid-template-columns: clamp(108px, 7vw, 140px) 1fr clamp(150px, 10vw, 190px);
   gap: 12px;
   align-items: start;
 }
-.row label { padding-top: 9px; color: var(--ink-soft); }
+.row label { padding-top: calc((var(--control-h) - 1.45em) / 2); color: var(--ink-soft); }
 .field { min-width: 0; }
 
 select,
@@ -134,7 +147,7 @@ input,
 button {
   font: inherit;
   color: inherit;
-  height: 40px;
+  height: var(--control-h);
   border-radius: 8px;
 }
 select,
@@ -161,14 +174,18 @@ button:not(:disabled):active { transform: translateY(1px); }
 
 :focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 
-.hint { margin: 2px 0 0; max-width: 46ch; color: var(--ink-soft); }
+.hint { margin: 0; padding-top: calc((var(--control-h) - 1.45em) / 2); max-width: 46ch; color: var(--ink-soft); }
 .error { margin: 0; color: var(--stop); max-width: 60ch; }
 .meta { margin: 10px 0 0; font-size: var(--s-small); color: var(--ink-soft); }
 .meta .ip { color: var(--ink); margin-left: 6px; }
 
-/* Narrow windows: the route turns vertical, controls stack. */
+/* Narrow windows: controls stack below 720 px, the route turns vertical below 600 px. */
+@media (max-width: 720px) {
+  .row { grid-template-columns: 1fr; gap: 6px; }
+  .row label { padding-top: 0; }
+}
+
 @media (max-width: 600px) {
-  main { padding: 28px 20px; }
   .route { grid-template-columns: 1fr; row-gap: 18px; column-gap: 0; }
   .route li { padding: 0 0 0 calc(var(--pin) + 14px); }
   .route li + li::before {
@@ -177,6 +194,4 @@ button:not(:disabled):active { transform: translateY(1px); }
     width: var(--line);
     height: 14px;
   }
-  .row { grid-template-columns: 1fr; gap: 6px; }
-  .row label { padding-top: 0; }
 }

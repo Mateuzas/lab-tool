@@ -146,3 +146,20 @@ is CSS injection (can restyle, cannot run code). Revisit if xterm adds nonce sup
 - Terminal: backend done (`app/src-tauri/src/term.rs`: `term_open(cols, rows, onEvent)`,
   `term_write(id, data)`, `term_resize(id, cols, rows)`, `term_close(id)`; events
   `{event:"data", data:[bytes]}` / `{event:"exit"}`). Frontend (xterm.js) not written yet.
+
+## Pass 3 (2026-10-02): responsive layout
+
+Problem: at full screen everything sat in the top-left corner (fixed 680 px column, no centring).
+
+- Content column centred: `width: min(1120px, 100% - 2 * gutter)`, gutter `clamp(20px, 5vw, 72px)`.
+  Text stays left-aligned inside the column (easier to read than centred text).
+- Fluid scale: headline `clamp(30px, 1.6vw + 18px, 50px)`, lead text and route spacing scale
+  similarly; top padding scales with window height (`clamp(28px, 7vh, 88px)`).
+- Wide windows (>= 1000 px): the two control rows sit side by side.
+- Top-anchored on purpose: the space below the controls is reserved for the terminal.
+- Breakpoints kept: controls stack < 720 px, route turns vertical < 600 px.
+- Self-critique after building (screenshots at 1920, 1470, 900, 680 px): only the headline
+  scaled at first, so body text and controls looked tiny at full screen; body, small text,
+  route pins and control height (`--control-h`) now scale with `clamp()` too. Row labels
+  drifted when a row grew taller (multi-line hint); labels and hint now align to the first
+  control line instead of the row's centre.
