@@ -1,0 +1,14 @@
+{
+  "user_options": {
+    "connections": {
+      "socks_proxy": {
+        "use_proxy": true,
+        "host": "127.0.0.1",
+        "port": 1080,
+        "dns_over_socks": true,
+        "username": "",
+        "password": ""
+      }
+    }
+  }
+}

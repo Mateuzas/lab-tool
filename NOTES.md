@@ -98,3 +98,13 @@
   real hosts. The gate passes, but a kill switch (container egress: lab ranges only via tun0,
   eth0 only to the VPN server) is still required in the tool-server task.
 - **Tasks 2 and 3 pass.** Per Global Constraints, Task 4 (Burp) is next.
+
+## Task 4 (2026-10-02, Burp Suite 2026.8.0 Community, "Burp Suite.app" combined installer)
+
+- **4.2 automated: PASS.** Launched with
+  `open -a "Burp Suite" --args --user-config-file=burp/user-options.json --config-file=burp/project-options.json`.
+  Settings showed SOCKS proxy on, "Configured proxy 127.0.0.1:1080 with DNS tunnelling", with
+  "Override options for this project only" on (the project file took effect). No manual setup.
+  App consequence: the app can launch Burp pre-configured; beginners never open Settings.
+- Install note: the DMG must be dragged to Applications; the app is now named `Burp Suite.app`
+  (not "Burp Suite Community Edition.app"). Detection should use the bundle, not the name.
