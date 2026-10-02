@@ -45,3 +45,12 @@
 - **Burp MCP:** PortSwigger's official MCP Server extension (BApp Store) works on Community
   Edition and ships a stdio proxy with auto-install for Claude Desktop.
 - **6.2 (who pays) and 6.5 (employment contract): Matas to decide/read.**
+
+## Plan corrections
+
+- **Step 1.6 must also install `procps`.** The kali-rolling base image has no `pkill`, which
+  steps 2.4/3.6 use. Corrected package list:
+  `apt install -y openvpn iproute2 iputils-ping curl nmap procps microsocks`
+- `vpn-up.sh` (2.2-2.8, 3.3-3.4) and `target-test.sh <IP> [PORT]` (2.9, 3.5-3.6) script the
+  manual steps. Tested: missing .ovpn -> refused; .ovpn with `up`/`script-security` hooks ->
+  refused; malformed .ovpn -> openvpn log shown. Not yet tested against a real HTB server.
