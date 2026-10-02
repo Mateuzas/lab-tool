@@ -19,6 +19,7 @@ host/                Mac side (the app will replace these)
 tests/               gate and fault-injection tests
 tools/               dev utilities (mcp-probe.py: Burp MCP; drive-shell.py: types into lab shell)
 docs/                spike notes and decisions
+tutor/               sandboxed Claude Code tutor (run `claude` here): reads logs + Burp, cannot act
 workspace/           USER DATA, gitignored, the only thing mounted into the container (/lab)
   vpn/                 .ovpn files (contain credentials - never commit or share)
   state/               status.json, events.log, selected-vpn

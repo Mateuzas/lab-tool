@@ -260,3 +260,13 @@ move: ALL PASS, same timings.
 - Machine stopped answering a few minutes later (no replies, nothing rejected locally): machine
   stopped/expired on HTB's side, after all checks had passed.
 - Repo pushed to github.com/Mateuzas/lab-tool (private), remote via SSH.
+
+## Task 5 setup: sandboxed tutor (2026-10-02)
+
+- From here on Claude sends nothing to lab machines (HTB AUP 6.1); infrastructure tests that
+  touched targets are done. The student runs every command.
+- `tutor/`: separate Claude Code session (`cd tutor && claude`). Rules in `tutor/CLAUDE.md`
+  (plan step 5.1 + data sources + AUP limits). Enforced in `tutor/.claude/settings.json`:
+  allowed = read `workspace/logs`, `status.json`, Burp history reads; denied = Bash, Write, Edit,
+  web, VPN files, every Burp tool that sends or changes anything.
+- Target for the run: 10.129.15.9 (Appointment, respawned), scope set.

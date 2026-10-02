@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "additionalDirectories": ["../workspace/logs", "../workspace/state"],
+    "allow": [
+      "Read(../workspace/logs/**)",
+      "Read(../workspace/state/status.json)",
+      "mcp__burp__get_proxy_http_history",
+      "mcp__burp__get_proxy_http_history_regex",
+      "mcp__burp__get_proxy_websocket_history",
+      "mcp__burp__get_proxy_websocket_history_regex",
+      "mcp__burp__url_decode",
+      "mcp__burp__base64_decode"
+    ],
+    "deny": [
+      "Bash",
+      "Write",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch",
+      "Read(../workspace/vpn/**)",
+      "mcp__burp__send_http1_request",
+      "mcp__burp__send_http2_request",
+      "mcp__burp__create_repeater_tab",
+      "mcp__burp__create_repeater_tab_http2",
+      "mcp__burp__send_to_intruder",
+      "mcp__burp__set_project_options",
+      "mcp__burp__set_user_options",
+      "mcp__burp__set_task_execution_engine_state",
+      "mcp__burp__set_proxy_intercept_state",
+      "mcp__burp__set_active_editor_contents"
+    ]
+  },
+  "enableAllProjectMcpServers": true
+}
