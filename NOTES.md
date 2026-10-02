@@ -72,3 +72,14 @@
   Unreachable" from the HTB gateway 10.10.14.1 (so the tunnel works). The VPN file was for the
   Labs free server, and the machine was on another VPN network. Beginner UX lesson: the app
   must match the VPN file to the section/server the machine was spawned on, or say clearly why not.
+
+## UX finding: VPN file per HTB section (2026-10-02)
+
+- Meow (listed at /machines/Meow) was unreachable on the Machines VPN (EU Machines 3 =
+  edge-eu-free-3) while the HTB header showed "Connected". It is a Starting Point box and needs
+  the Starting Point VPN (EU StartingPoint 2). Both VPNs push 10.129.0.0/16, so the target IP
+  alone cannot tell which file is needed.
+- App idea: import each section's .ovpn once, label it from its `remote` hostname, and have the
+  student pick the section (or the machine) so the app switches tunnels automatically. Files only
+  change if the student changes server. HTB API automation of this is a grey area under AUP
+  6.1/6.3, so do not build it without asking HTB.
