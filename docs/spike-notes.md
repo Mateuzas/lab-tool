@@ -322,3 +322,17 @@ move: ALL PASS, same timings.
 - Live round trip (`cargo test -- --ignored`): disconnect -> reconnect in 11 s with the same
   file; `../../etc/passwd` and `not an ip; rm -rf /` refused; target restored.
 - UI pass 1 per docs/design.md (frontend-design skill), checked via screenshots of all states.
+
+## CI and release plan (2026-10-02)
+
+- `.github/workflows/ci.yml` (Linux runners): `make lint`, UI type-check/build + `cargo test
+  --locked`, container image build. First run green: 13 s / 220 s / 29 s (~4-5 runner minutes
+  per push; private-repo free tier is 2,000 min/month). actionlint clean.
+- Proposed releases (not built yet): trunk-based `main` + short feature branches with required
+  CI; Release Please opens a release PR (version bump in package.json / Cargo.toml /
+  tauri.conf.json + changelog from conventional commits); merging it tags + creates a GitHub
+  Release; `tauri-action` builds the .dmg on macOS runners only for releases; Tauri updater
+  plugin delivers updates from GitHub Releases.
+- Costs to decide: Apple Developer Program ($99/yr) for signing + notarization (else Gatekeeper
+  warnings); macOS runner minutes count 10x on private repos; GHCR private storage 500 MB free
+  vs 633 MB image; Windows signing later. Decisions pending: repo public/private, Apple signing.
