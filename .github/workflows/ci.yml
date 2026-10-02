@@ -61,3 +61,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the lab image (not pushed)
         run: docker build -t kali-lab:ci container/
+
+  # The one check to require in branch protection: green only if every job above passed, so
+  # adding jobs later never means editing the protection rules.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [lint, app, container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: All jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "job results: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
