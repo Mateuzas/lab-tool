@@ -2,12 +2,15 @@
 # Lab supervisor: the container's main process. Keeps the kill switch, the VPN and the proxy up,
 # and writes /lab/state/status.json for the app (state + plain-language message).
 #
+# /lab is the mounted workspace (user data only; code lives in the image).
 # Inputs (written by the Mac side):
+#   /lab/vpn/*.ovpn           the student's VPN files
 #   /lab/state/selected-vpn   basename of the .ovpn to use (empty/missing = stay disconnected)
 #   /lab/state/hold           if present, do not restart the VPN (used by drop tests)
 set -u
 
 STATE=/lab/state
+VPN_DIR=/lab/vpn
 STATUS=$STATE/status.json
 EVENTS=$STATE/events.log
 VPN_LOG=/tmp/ovpn.log
@@ -34,7 +37,7 @@ write_status() {
   if iptables -S OUTPUT 2>/dev/null | grep -q -- '-o tun0'; then ks=on
   elif iptables -S OUTPUT 2>/dev/null | grep -q REJECT; then ks=block
   else ks=off; fi
-  [ -n "$current" ] && server=$(awk '/^remote /{print $2; exit}' "/lab/$current" 2>/dev/null)
+  [ -n "$current" ] && server=$(awk '/^remote /{print $2; exit}' "$VPN_DIR/$current" 2>/dev/null)
   printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
     "$state" "$message" "$current" "$server" "$lab_ip" "$gateway_ms" "$proxy" "$ks" \
     "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
@@ -49,7 +52,7 @@ vpn_alive() { [ -n "$vpn_pid" ] && kill -0 "$vpn_pid" 2>/dev/null; }
 
 start_vpn() {
   # HTB pushes ping-restart 120; override so a dead tunnel is noticed in ~20 s.
-  openvpn --config "/lab/$current" --log "$VPN_LOG" \
+  openvpn --config "$VPN_DIR/$current" --log "$VPN_LOG" \
     --pull-filter ignore ping --ping 5 --ping-restart 20 >/dev/null 2>&1 &
   vpn_pid=$!
   vpn_started=$(date +%s)
@@ -58,8 +61,8 @@ start_vpn() {
 
 ensure_kill_switch() {
   if ! iptables -S OUTPUT 2>/dev/null | grep -q -- '-o tun0'; then
-    if ! sh /lab/kill-switch.sh on "/lab/$current" >/dev/null 2>&1; then
-      sh /lab/kill-switch.sh block >/dev/null 2>&1
+    if ! lab-kill-switch on "$VPN_DIR/$current" >/dev/null 2>&1; then
+      lab-kill-switch block >/dev/null 2>&1
       return 1
     fi
     log "kill switch on"
@@ -92,15 +95,15 @@ classify_error() {
 
 trap 'stop_vpn; log "supervisor stopped"; exit 0' TERM INT
 log "supervisor started"
-sh /lab/kill-switch.sh block >/dev/null 2>&1   # closed until a VPN is chosen
+lab-kill-switch block >/dev/null 2>&1   # closed until a VPN is chosen
 
 while true; do
   selected=$(cat "$STATE/selected-vpn" 2>/dev/null | tr -d '[:space:]')
 
   if [ "$selected" != "$current" ]; then
     stop_vpn; current=$selected; refused=""; restarts=0; ever_connected=""
-    sh /lab/kill-switch.sh block >/dev/null 2>&1
-    if [ -n "$current" ] && [ -f "/lab/$current" ] && grep -qE "$HOOKS" "/lab/$current"; then
+    lab-kill-switch block >/dev/null 2>&1
+    if [ -n "$current" ] && [ -f "$VPN_DIR/$current" ] && grep -qE "$HOOKS" "$VPN_DIR/$current"; then
       refused=yes
       log "refused $current: contains script hooks"
     fi
@@ -110,7 +113,7 @@ while true; do
 
   if [ -z "$current" ]; then
     set_state disconnected "Choose a lab to connect to."
-  elif [ ! -f "/lab/$current" ]; then
+  elif [ ! -f "$VPN_DIR/$current" ]; then
     set_state error "The VPN file $current is missing. Download it from HTB."
   elif [ -n "$refused" ]; then
     set_state error "This VPN file contains commands that could run on your computer, so it was blocked. Download it again from HTB."

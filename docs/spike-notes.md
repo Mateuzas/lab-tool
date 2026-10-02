@@ -216,3 +216,12 @@
   only accepts states entered after the fault. Keep this pattern for future tests.
 - Tuning later: outage detection (35 s) could be faster; `kill-switch-test.sh` now uses
   `state/hold` and must be re-run when a target is spawned again.
+
+## Repo restructure (2026-10-02)
+
+Paths above are historical. New layout (see README): `container/` (Dockerfile, `bin/lab-supervisor`,
+`bin/lab-kill-switch`, baked into image `kali-lab:dev`), `host/lab` (replaces vpn-up.sh and
+capture.sh), `tests/`, `tools/`, `docs/`, and gitignored `workspace/` (vpn/, state/, captures/) -
+now the ONLY mount (`/lab`), so the container can no longer see or modify the code. `make help`
+lists entry points; `make lint` (ShellCheck in Docker) is clean. Supervisor test re-run after the
+move: ALL PASS, same timings.

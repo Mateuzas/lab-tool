@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Proves the kill switch (Review Focus 2 + 5). Run on the Mac with the VPN up:
-#   ./kill-switch-test.sh <TARGET_IP> [PORT]
+#   tests/kill-switch-test.sh <TARGET_IP> [PORT]
 # Only use an IP of a machine you spawned yourself.
 set -uo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.." || exit 1   # repo root
+WS=${LAB_WORKSPACE:-workspace}
 
-TARGET=${1:?usage: ./kill-switch-test.sh <TARGET_IP> [PORT]}
+TARGET=${1:?usage: tests/kill-switch-test.sh <TARGET_IP> [PORT]}
 PORT=${2:-80}
 in_kali() { docker exec kali-lab bash -c "$1"; }
 via_proxy() { curl -sS -m 10 --socks5-hostname 127.0.0.1:1080 -o /dev/null -w '%{http_code}' "$1" 2>&1; }
@@ -23,7 +24,7 @@ out=$(via_proxy "http://example.com/"); echo "  got: $out"
 echo "== 3. VPN drop: nothing for 10.0.0.0/8 may leave via eth0"
 in_kali 'rm -f /tmp/leak.pcap; (setsid tcpdump -n -i eth0 -w /tmp/leak.pcap "net 10.0.0.0/8" >/dev/null 2>&1 &)'
 sleep 1
-touch state/hold; in_kali 'pkill -x openvpn'; sleep 2
+touch "$WS/state/hold"; in_kali 'pkill -x openvpn'; sleep 2
 start=$(python3 -c 'import time; print(time.time())')
 out=$(via_proxy "http://$TARGET:$PORT/")
 secs=$(python3 -c "import time; print(round(time.time()-$start, 2))")
@@ -36,9 +37,9 @@ echo "  packets to 10.0.0.0/8 seen on eth0: $leaked"
 [ "$leaked" -eq 0 ] && check ok "no lab traffic leaked to the host network" || check bad "no lab traffic leaked to the host network"
 
 echo "== 4. VPN reconnects through the kill switch"
-rm -f state/hold
+rm -f "$WS/state/hold"
 for _ in $(seq 1 40); do
-  grep -q '"state":"connected"' state/status.json 2>/dev/null && break
+  grep -q '"state":"connected"' "$WS/state/status.json" 2>/dev/null && break
   sleep 1
 done
 code=$(via_proxy "http://$TARGET:$PORT/"); echo "  got: $code"

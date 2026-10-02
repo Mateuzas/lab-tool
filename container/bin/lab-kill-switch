@@ -1,10 +1,10 @@
 #!/bin/sh
 # Container egress firewall (runs INSIDE the container as root).
-#   kill-switch.sh on <file.ovpn>   lab traffic only via tun0; eth0 only for DNS, the VPN server,
+#   lab-kill-switch on <file.ovpn>   lab traffic only via tun0; eth0 only for DNS, the VPN server,
 #                                   and replies to the Mac's proxy connections. All else rejected.
-#   kill-switch.sh block            everything closed (used when the VPN server can't be resolved)
-#   kill-switch.sh off              open egress (maintenance, e.g. apt)
-#   kill-switch.sh status
+#   lab-kill-switch block            everything closed (used when the VPN server can't be resolved)
+#   lab-kill-switch off              open egress (maintenance, e.g. apt)
+#   lab-kill-switch status
 set -eu
 
 reset() {
@@ -16,7 +16,7 @@ reset() {
 
 case "${1:-status}" in
   on)
-    OVPN=${2:?usage: kill-switch.sh on <file.ovpn>}
+    OVPN=${2:?usage: lab-kill-switch on <file.ovpn>}
     DNS=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)
     HOST=$(awk '/^remote /{print $2; exit}' "$OVPN")
     PORT=$(awk '/^remote /{print $3; exit}' "$OVPN")
@@ -64,5 +64,5 @@ case "${1:-status}" in
   status)
     iptables -S OUTPUT; ip6tables -S OUTPUT ;;
   *)
-    echo "usage: kill-switch.sh on <file.ovpn> | block | off | status"; exit 1 ;;
+    echo "usage: lab-kill-switch on <file.ovpn> | block | off | status"; exit 1 ;;
 esac

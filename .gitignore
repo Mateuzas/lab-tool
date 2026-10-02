@@ -1,3 +1,2 @@
-*.ovpn
-captures/
-state/
+# User data: VPN files (credentials), status, captures. Never commit.
+workspace/

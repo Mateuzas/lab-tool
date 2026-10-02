@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Mac-side control for the lab container. The app will later call the same operations.
+#
+#   lab build                  build the image (and recreate the container if it exists)
+#   lab up [filter]            connect with the .ovpn in workspace/vpn/ matching filter
+#   lab off                    disconnect (all egress stays blocked)
+#   lab status                 print workspace/state/status.json
+#   lab shell                  open a terminal in the container
+#   lab logs                   supervisor events
+#   lab capture live           stream lab traffic into Wireshark
+#   lab capture save [secs]    save to workspace/captures/<time>.pcap (default 30 s)
+#   lab capture summary <file> text summary of a capture (what the tutor reads)
+#   lab burp                   launch Burp pre-configured to use the lab proxy
+#
+# Environment: LAB_WORKSPACE (default <repo>/workspace), LAB_IMAGE (default kali-lab:dev)
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+WORKSPACE=${LAB_WORKSPACE:-$ROOT/workspace}
+IMAGE=${LAB_IMAGE:-kali-lab:dev}
+CONTAINER=kali-lab
+STATE=$WORKSPACE/state
+mkdir -p "$WORKSPACE/vpn" "$STATE" "$WORKSPACE/captures"
+
+field() {
+  python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' \
+    "$STATE/status.json" "$1" 2>/dev/null
+}
+
+ensure_container() {
+  if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    docker run -d --name "$CONTAINER" --init --restart unless-stopped \
+      --cap-add=NET_ADMIN --device /dev/net/tun \
+      -p 127.0.0.1:1080:1080 -v "$WORKSPACE":/lab "$IMAGE" >/dev/null
+  fi
+  docker start "$CONTAINER" >/dev/null
+}
+
+cmd_build() {
+  docker build -q -t "$IMAGE" "$ROOT/container" >/dev/null
+  echo "built $IMAGE ($(docker image ls "$IMAGE" --format '{{.Size}}'))"
+  if docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    docker rm -f "$CONTAINER" >/dev/null
+    ensure_container
+    echo "container recreated"
+  fi
+}
+
+cmd_up() {
+  local filter=${1:-} matches="" count=0 sel t0 st=starting f name
+  for f in "$WORKSPACE"/vpn/*.ovpn; do
+    [ -e "$f" ] || continue
+    name=$(basename "$f")
+    case "$(tr '[:upper:]' '[:lower:]' <<< "$name")" in
+      *"$(tr '[:upper:]' '[:lower:]' <<< "$filter")"*) matches=$f; count=$((count + 1)) ;;
+    esac
+  done
+  if [ "$count" -ne 1 ]; then
+    echo "'${filter:-*}' matches $count .ovpn files in $WORKSPACE/vpn:"
+    for f in "$WORKSPACE"/vpn/*.ovpn; do
+      [ -e "$f" ] && echo "  $(basename "$f")  ->  $(grep -m1 '^remote ' "$f" | cut -d' ' -f2)"
+    done
+    echo "Pass a word from one file name, e.g. lab up starting"
+    exit 1
+  fi
+  sel=$(basename "$matches")
+  t0=$(date +%s)
+  echo "$sel" > "$STATE/selected-vpn"
+  ensure_container
+  echo "using $sel"
+  for _ in $(seq 1 30); do
+    if [ "$(field vpn_file)" = "$sel" ] && [ "$(field updated)" -gt "$t0" ]; then
+      st=$(field state)
+      case "$st" in connected|error) break ;; esac
+    fi
+    sleep 2
+  done
+  python3 -m json.tool "$STATE/status.json"
+  [ "$st" = connected ]
+}
+
+cmd_capture() {
+  local wireshark=/Applications/Wireshark.app/Contents/MacOS/Wireshark out secs f
+  case "${1:-live}" in
+    live)
+      [ -x "$wireshark" ] || { echo "Wireshark is not installed in /Applications."; exit 1; }
+      # -U flushes each packet so Wireshark updates live; exec -i (no -t) keeps the pipe binary-clean.
+      docker exec -i "$CONTAINER" tcpdump -U -n -i tun0 -w - 2>/dev/null | "$wireshark" -k -i - ;;
+    save)
+      secs=${2:-30}
+      out="captures/$(date +%Y%m%d-%H%M%S).pcap"
+      echo "capturing tun0 for ${secs}s -> workspace/$out"
+      docker exec "$CONTAINER" timeout "$secs" tcpdump -U -n -i tun0 -w "/lab/$out" 2>&1 | tail -2 || true
+      echo "$out" ;;
+    summary)
+      f=${2:?usage: lab capture summary captures/<file>.pcap}
+      docker exec "$CONTAINER" sh -c "
+        echo '== protocols'; tshark -r '/lab/$f' -q -z io,phs 2>/dev/null | sed -n '/Protocol Hierarchy/,/====/p' | head -30
+        echo '== conversations'; tshark -r '/lab/$f' -q -z conv,tcp 2>/dev/null | head -20
+        echo '== first packets'; tshark -r '/lab/$f' -c 15 2>/dev/null" ;;
+    *) echo "usage: lab capture live | save [secs] | summary <file>"; exit 1 ;;
+  esac
+}
+
+cmd_burp() {
+  open -a "/Applications/Burp Suite.app" --args \
+    --user-config-file="$ROOT/host/burp/user-options.json" \
+    --config-file="$ROOT/host/burp/project-options.json"
+}
+
+case "${1:-status}" in
+  build)   cmd_build ;;
+  up)      shift; cmd_up "${1:-}" ;;
+  off)     : > "$STATE/selected-vpn"; echo "disconnected" ;;
+  status)  python3 -m json.tool "$STATE/status.json" ;;
+  shell)   docker exec -it "$CONTAINER" bash ;;
+  logs)    tail -n "${2:-30}" "$STATE/events.log" ;;
+  capture) shift; cmd_capture "$@" ;;
+  burp)    cmd_burp ;;
+  *)       sed -n '2,15p' "$0"; exit 1 ;;
+esac
