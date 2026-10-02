@@ -20,10 +20,11 @@ function show(prefix: string, level: Level, text: string, action: string, enable
   $(`${prefix}-tip`).hidden = !tip;
 }
 
-/** Burp and Wireshark tabs: one sentence, the tool's state, one button. */
+/** Burp, Wireshark and Claude tabs: one sentence, the tool's state, one button. */
 export function setupTools(labConnected: () => boolean) {
   let burp: ToolStatus | null = null;
   let ws: ToolStatus | null = null;
+  let claude: ToolStatus | null = null;
   let busy = false;
 
   const draw = () => {
@@ -38,11 +39,19 @@ export function setupTools(labConnected: () => boolean) {
       else if (!labConnected()) show("ws", "off", "Connect to the lab first, then watch its traffic here.", "Watch lab traffic", false, false);
       else show("ws", "off", "Ready.", "Watch lab traffic", !busy, false);
     }
+    if (claude) {
+      if (!claude.installed) show("claude", "off", "Claude Code isn't installed on this Mac.", "Get Claude Code", true, false);
+      else show("claude", "off", "Ready. Opens in its own window.", "Open tutor", !busy, true);
+    }
   };
 
   const refresh = async () => {
     try {
-      [burp, ws] = await Promise.all([invoke<ToolStatus>("burp_status"), invoke<ToolStatus>("wireshark_status")]);
+      [burp, ws, claude] = await Promise.all([
+        invoke<ToolStatus>("burp_status"),
+        invoke<ToolStatus>("wireshark_status"),
+        invoke<ToolStatus>("claude_status"),
+      ]);
     } catch {
       /* keep the last known state */
     }
@@ -67,6 +76,8 @@ export function setupTools(labConnected: () => boolean) {
 
   $("burp-action").addEventListener("click", () =>
     act(() => (burp?.installed ? invoke("open_burp") : invoke("get_tool", { tool: "burp" }))));
+  $("claude-action").addEventListener("click", () =>
+    act(() => (claude?.installed ? invoke("open_tutor") : invoke("get_tool", { tool: "claude" }))));
   $("ws-action").addEventListener("click", () =>
     act(() => (ws?.installed ? invoke("watch_traffic") : invoke("get_tool", { tool: "wireshark" }))));
 

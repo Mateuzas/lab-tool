@@ -77,8 +77,8 @@ const toolState = { installed: toolMode !== "missing", running: toolMode === "ru
       return 1;
     }
     if (cmd === "term_write") { shell?.(args.data); return null; }
-    if (cmd === "burp_status" || cmd === "wireshark_status") return toolState;
-    if (["open_burp", "watch_traffic", "get_tool"].includes(cmd)) return null;
+    if (cmd === "burp_status" || cmd === "wireshark_status" || cmd === "claude_status") return toolState;
+    if (["open_burp", "watch_traffic", "get_tool", "open_tutor"].includes(cmd)) return null;
     if (cmd === "set_target" && args.ip && !/^\d{1,3}(\.\d{1,3}){3}$/.test(args.ip.trim()))
       throw `"${args.ip}" isn't an IP address. Copy it from the machine's page on HTB.`;
     return null;

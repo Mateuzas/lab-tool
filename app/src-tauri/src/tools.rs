@@ -1,5 +1,6 @@
-//! Native Mac tools next to the lab: Burp Suite (pre-configured to use the lab proxy) and
-//! Wireshark (live view of the lab's VPN traffic). Install detection, launch, download links.
+//! Native Mac tools next to the lab: Burp Suite (pre-configured to use the lab proxy),
+//! Wireshark (live view of the lab's VPN traffic) and the Claude tutor (Claude Code in the
+//! read-only tutor/ sandbox). Install detection, launch, download links.
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -19,6 +20,11 @@ const BURP_PROJECT_OPTIONS: &str = include_str!("../../../host/burp/project-opti
 /// Official download pages. Only these fixed URLs can be opened.
 const BURP_DOWNLOAD: &str = "https://portswigger.net/burp/communitydownload";
 const WIRESHARK_DOWNLOAD: &str = "https://www.wireshark.org/download.html";
+const CLAUDE_DOWNLOAD: &str = "https://claude.com/claude-code";
+
+/// The tutor sandbox (CLAUDE.md rules + read-only permissions). Dev builds use the repo's copy;
+/// a packaged app will need to ship its own.
+const TUTOR_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tutor");
 
 #[derive(Serialize)]
 pub struct ToolStatus {
@@ -41,6 +47,26 @@ fn burp_app() -> Option<PathBuf> {
 
 fn wireshark_bin() -> Option<PathBuf> {
     Some(PathBuf::from("/Applications/Wireshark.app/Contents/MacOS/Wireshark")).filter(|p| p.exists())
+}
+
+/// Where Claude Code's installer and Homebrew put the `claude` command. GUI apps don't get the
+/// user's shell PATH, so look in the known places.
+fn claude_bin() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    [home.join(".local/bin/claude"), home.join(".claude/local/claude"),
+     PathBuf::from("/opt/homebrew/bin/claude"), PathBuf::from("/usr/local/bin/claude")]
+        .into_iter()
+        .find(|p| p.exists())
+}
+
+/// Quote for a POSIX shell: wrap in single quotes, escape embedded ones.
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// Quote for an AppleScript string literal.
+fn applescript_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn process_running(pattern: &str) -> bool {
@@ -129,11 +155,27 @@ impl Tools {
     }
 }
 
+pub fn claude_status() -> ToolStatus {
+    ToolStatus { installed: claude_bin().is_some(), running: false }
+}
+
+/// Open a Terminal window running Claude Code in the tutor sandbox. Paths are fixed (no user
+/// input) and quoted for both the shell and AppleScript.
+pub fn open_tutor() -> Result<(), String> {
+    let bin = claude_bin().ok_or("Claude Code isn't installed.")?;
+    let dir = std::fs::canonicalize(TUTOR_DIR).map_err(|_| "The tutor folder is missing.".to_string())?;
+    let cmd = format!("cd {} && {}", sh_quote(&dir.to_string_lossy()), sh_quote(&bin.to_string_lossy()));
+    let script = format!("tell application \"Terminal\"\nactivate\ndo script {}\nend tell", applescript_quote(&cmd));
+    let ok = Command::new("osascript").arg("-e").arg(script).status().map_err(|e| e.to_string())?;
+    if ok.success() { Ok(()) } else { Err("Couldn't open a Terminal window.".into()) }
+}
+
 /// Open an official download page in the default browser.
 pub fn open_download(tool: &str) -> Result<(), String> {
     let url = match tool {
         "burp" => BURP_DOWNLOAD,
         "wireshark" => WIRESHARK_DOWNLOAD,
+        "claude" => CLAUDE_DOWNLOAD,
         _ => return Err("Unknown tool.".into()),
     };
     Command::new("open").arg(url).status().map_err(|e| e.to_string())?;
@@ -150,6 +192,12 @@ mod tests {
         assert!(open_download("https://example.com").is_err());
     }
 
+    #[test]
+    fn quoting_survives_awkward_paths() {
+        assert_eq!(sh_quote("/a b/it's"), r"'/a b/it'\''s'");
+        assert_eq!(applescript_quote(r#"say "hi" \ bye"#), r#""say \"hi\" \\ bye""#);
+    }
+
     /// Checks this Mac's real installs. Run with: cargo test -- --ignored
     #[test]
     #[ignore]
@@ -158,5 +206,7 @@ mod tests {
         let (b, w) = (t.burp_status(), t.wireshark_status());
         println!("burp installed={} running={}  wireshark installed={} running={}", b.installed, b.running, w.installed, w.running);
         assert!(b.installed && w.installed);
+        assert!(claude_status().installed, "claude CLI not found");
+        assert!(std::fs::canonicalize(TUTOR_DIR).unwrap().join("CLAUDE.md").exists(), "tutor sandbox missing");
     }
 }

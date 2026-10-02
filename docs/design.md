@@ -241,3 +241,12 @@ dark-palette colour (invisible on Argo's light background).
   "Watching" button looked broken, so the button is hidden while Wireshark runs and the green
   state line carries the message. Checked at 1470 and 640 px, all tool states (missing, ready,
   running).
+
+## Pass 6 (2026-10-02): Claude tab
+
+Same pattern as the Burp/Wireshark tabs: heading, one sentence, state, one button, tip.
+"Open tutor" opens a macOS Terminal window running Claude Code in `tutor/` (the Task 5
+sandbox: reads the command log, lab status and Burp history; cannot run commands or edit
+files). Model = whatever the user's Claude Code is set to; the app does not pin one.
+Not installed -> "Get Claude Code" (fixed official URL). Dev-only for now: the tutor folder
+path is the repo's; a packaged app will need its own copy of the tutor config.

@@ -79,6 +79,16 @@ async fn watch_traffic(tools: State<'_, tools::Tools>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn claude_status() -> tools::ToolStatus {
+    tools::claude_status()
+}
+
+#[tauri::command]
+fn open_tutor() -> Result<(), String> {
+    tools::open_tutor()
+}
+
+#[tauri::command]
 fn get_tool(tool: String) -> Result<(), String> {
     tools::open_download(&tool)
 }
@@ -91,7 +101,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             lab_status, vpn_files, connect, disconnect, set_target,
             term_open, term_write, term_resize, term_close,
-            burp_status, open_burp, wireshark_status, watch_traffic, get_tool
+            burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
+            claude_status, open_tutor
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

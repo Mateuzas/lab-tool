@@ -15,6 +15,7 @@
           <button type="button" role="tab" id="tab-terminal" aria-controls="panel-terminal" aria-selected="false" tabindex="-1">Terminal</button>
           <button type="button" role="tab" id="tab-burp" aria-controls="panel-burp" aria-selected="false" tabindex="-1">Burp</button>
           <button type="button" role="tab" id="tab-wireshark" aria-controls="panel-wireshark" aria-selected="false" tabindex="-1">Wireshark</button>
+          <button type="button" role="tab" id="tab-claude" aria-controls="panel-claude" aria-selected="false" tabindex="-1">Claude</button>
         </div>
         <p class="chip" id="chip" data-level="working"><span class="dot" aria-hidden="true"></span><span id="chip-text">Checking</span></p>
       </div>
@@ -111,6 +112,19 @@
           <p class="tool-state" id="ws-state" data-level="off"><span class="dot" aria-hidden="true"></span><span id="ws-state-text">Checking…</span></p>
           <button type="button" class="primary" id="ws-action" disabled>Watch lab traffic</button>
           <p class="tip" id="ws-tip">Close the Wireshark window to stop watching.</p>
+        </div>
+      </section>
+
+      <section class="panel tool" id="panel-claude" role="tabpanel" aria-labelledby="tab-claude" hidden>
+        <div class="block">
+          <h1>Claude</h1>
+          <p class="lead">
+            Your tutor. It reads what you've run in the terminal and what Burp has seen, explains it,
+            and asks you questions. It never runs anything itself.
+          </p>
+          <p class="tool-state" id="claude-state" data-level="off"><span class="dot" aria-hidden="true"></span><span id="claude-state-text">Checking…</span></p>
+          <button type="button" class="primary" id="claude-action" disabled>Open tutor</button>
+          <p class="tip" id="claude-tip">Start by telling it which machine you're working on.</p>
         </div>
       </section>
     </main>
