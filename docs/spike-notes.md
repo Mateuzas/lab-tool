@@ -289,3 +289,11 @@ move: ALL PASS, same timings.
 - Takeaway: the tutoring design is validated. Open: which model/route the product uses so the
   first message is never refused. Candidate approaches to compare later: model choice, a system
   prompt that states the legal-training context up front, and an Anthropic-approved path.
+
+## Decision (2026-10-02): model/route is not a blocker
+
+- Matas: a slightly smaller model is acceptable for these labs; best model not needed. Carry on.
+- Approach: improve the tutor's CLAUDE.md to state the legal-training context clearly up front
+  (honest framing, which also reads as legitimate). NOT tuning wording to evade safety
+  classifiers (fragile, wrong foundation). Revisit the Anthropic usage-policy question later,
+  with 6.2 (who pays for Claude).
