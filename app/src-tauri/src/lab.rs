@@ -227,7 +227,7 @@ pub async fn set_target(ip: &str) -> Result<(), String> {
 }
 
 /// Docker reachable and the lab container running (started if it was stopped).
-async fn running_lab() -> Result<Docker, String> {
+pub(crate) async fn running_lab() -> Result<Docker, String> {
     let docker = connect_docker().ok_or("Start Docker Desktop to use the lab.")?;
     docker.ping().await.map_err(|_| "Start Docker Desktop to use the lab.")?;
     match docker.inspect_container(CONTAINER, None).await {

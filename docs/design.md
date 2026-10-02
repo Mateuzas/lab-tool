@@ -94,3 +94,55 @@ Tools: `make app-shots` renders every state from the dev preview mock
 Open for Matas's pass: window chrome/title bar, the empty space below the controls (where the
 terminal will go), an app icon, the VPN-file import flow (a file dialog instead of "put it in
 the vpn folder").
+
+## Pass 2 (2026-10-02): client palette (dark only) + built-in terminal
+
+### Palette (client-specified; light theme comes later)
+
+| Token | Value | Share | Role |
+|---|---|---|---|
+| `--bg` | `#0B090C` Deep Black | 60% | window |
+| `--surface` | `#161219` Surface Dark | 60% | terminal panel, fields |
+| `--text` | `#F8F9FA` Soft White | 30% | text |
+| `--text-soft` | Soft White at 62% | 30% | secondary text |
+| `--line` | Soft White at 14% | 30% | borders, idle route |
+| `--accent` | `#8A2BE2` Vibrant Purple | 10% | connected/working: route, headline, focus |
+| `--alert` | `#FF2A85` Neon Pink | 10% | the focal button (Connect) and alerts/broken hops |
+
+Contrast on `--bg`: purple ~3.3:1 (OK for large text and graphics only, so never small text);
+pink ~5.6:1 (OK for text). With two accents, "connecting" is told apart by pattern, not
+colour: solid purple line = connected, flowing purple dashes = connecting.
+
+### Layout with the terminal
+
+```
+ Connected to the lab
+ You can reach 10.129.15.9. Everything else is blocked, so a typo can't hit a real computer.
+ ●━━━━●━━━━●━━━━●━━━━●   This Mac / Kill switch / VPN / HTB lab / Target
+ Lab network [Starting Point (EU 2) v] (Disconnect)    Target [ip        ] (Set target)
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │ ┌──(root㉿kali)-[/lab]                                                     │  <- terminal fills
+ │ └─# _                                                                      │     the rest
+ └──────────────────────────────────────────────────────────────────────────┘
+```
+
+The terminal is the workspace, so it takes all remaining height. Controls sit on one row at
+normal widths. The route stays the memorable element; the terminal is quiet (Surface Dark,
+no border glow).
+
+### Security trade-off (CSP), to apply when the terminal UI lands
+
+Not applied yet: the CSP stays strict until the terminal frontend exists. When it lands:
+xterm.js 6 creates `<style>` tags at runtime and has no nonce option. `style-src` now allows
+`'unsafe-inline'`, and Tauri's style nonce injection is disabled
+(`dangerousDisableAssetCspModification: ["style-src"]`), because a nonce would make browsers
+ignore `'unsafe-inline'`. Scripts stay locked to the app's own nonce'd files; the residual risk
+is CSS injection (can restyle, cannot run code). Revisit if xterm adds nonce support.
+
+### Pass 2 status
+
+- Palette applied (dark only). Self-critique: idle route and field borders were ~1.4:1 on Deep
+  Black, too faint for meaningful graphics; raised `--rule` to `#606064` (3:1).
+- Terminal: backend done (`app/src-tauri/src/term.rs`: `term_open(cols, rows, onEvent)`,
+  `term_write(id, data)`, `term_resize(id, cols, rows)`, `term_close(id)`; events
+  `{event:"data", data:[bytes]}` / `{event:"exit"}`). Frontend (xterm.js) not written yet.

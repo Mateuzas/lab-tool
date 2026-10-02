@@ -1,14 +1,16 @@
 /* Lab Tool. Design record: docs/design.md (pass 1). */
 
 :root {
-  --paper: #eef1f4;
-  --ink: #1b2433;
-  --ink-soft: #5b6678;
-  --rule: #c9d0da;
-  --go: #17845f;
-  --wait: #b7791f;
-  --stop: #b3362b;
-  --field: #ffffff;
+  /* Client palette, dark only for now (docs/design.md, pass 2). */
+  --paper: #0b090c;      /* Deep Black: window (60%) */
+  --field: #161219;      /* Surface Dark: fields, panels (60%) */
+  --ink: #f8f9fa;        /* Soft White: text (30%) */
+  --ink-soft: #9e9ea0;   /* Soft White at ~62% on Deep Black */
+  --rule: #606064;       /* Soft White at ~33%: borders, idle route (3:1 on Deep Black) */
+  --go: #8a2be2;         /* Vibrant Purple: connected (large text and graphics only) */
+  --wait: #8a2be2;       /* connecting: same purple, told apart by the flowing pattern */
+  --stop: #ff2a85;       /* Neon Pink: alerts, broken hops */
+  --cta: #ff2a85;        /* Neon Pink: the focal button */
 
   --sans: "Atkinson Hyperlegible Next", system-ui, sans-serif;
   --mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
@@ -20,24 +22,11 @@
   --line: 3px;
   --hop-gap: 20px;
 
-  color-scheme: light dark;
+  color-scheme: dark;
   font: 400 var(--s-body) / 1.45 var(--sans);
   color: var(--ink);
   background: var(--paper);
   -webkit-font-smoothing: antialiased;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #151b25;
-    --ink: #e4e9f0;
-    --ink-soft: #98a3b5;
-    --rule: #2e3747;
-    --go: #3fb68b;
-    --wait: #e0a743;
-    --stop: #e5685c;
-    --field: #1d2531;
-  }
 }
 
 * { box-sizing: border-box; }
@@ -166,11 +155,11 @@ button {
   font-weight: 700;
   cursor: pointer;
 }
-button.primary { background: var(--ink); color: var(--paper); }
+button.primary { background: var(--cta); border-color: var(--cta); color: var(--paper); }
 button:disabled { opacity: 0.4; cursor: default; }
 button:not(:disabled):active { transform: translateY(1px); }
 
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--go); outline-offset: 2px; }
 
 .hint { margin: 2px 0 0; max-width: 46ch; color: var(--ink-soft); }
 .error { margin: 0; color: var(--stop); max-width: 60ch; }
