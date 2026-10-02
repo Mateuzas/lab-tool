@@ -116,3 +116,15 @@
 - **4.5 DECISION: PASS. The Docker architecture is confirmed** (Tasks 2, 3, 4 all pass on M4,
   macOS 26.5.2). Landing-site claims and app work are unblocked. UTM VM stays parked.
 - Open before app work: kill switch (3.6 caveat), Task 5 tutor test, Task 6.2 + 6.5 (Matas).
+
+## Claude <-> Burp via MCP (2026-10-02)
+
+- MCP Server BApp 1.3.0 (server "burp-suite" 1.1.2) installed to `~/.BurpSuite/bapps/` (user-level,
+  survives temporary projects). Listens on `127.0.0.1:9876` (SSE) only.
+- **PASS:** `burp/mcp-probe.py` listed 24 tools and `get_proxy_http_history` returned the
+  Appointment request/response (GET / -> 200, Apache/2.4.38, Login page). First history read
+  blocked until approved in Burp's UI (the extension's approval system) - good for AUP compliance,
+  but the app must surface that prompt or beginners will see a silent hang.
+- Request-sending/config-changing tools denied for Claude Code in `.claude/settings.json`
+  (send_http1/2, repeater, intruder, set_*_options, intercept, engine, editor writes).
+  Allowed: history/organizer/websocket reads, option reads, encode/decode helpers.
