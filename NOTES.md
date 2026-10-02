@@ -149,3 +149,17 @@
   MSS; keep the MTU item on the stability list.
 - `captures/` is gitignored (captures can contain credentials).
 - Pending: live stream into native Wireshark (`./capture.sh live`) once Wireshark is installed.
+- **Live stream PASS:** `./capture.sh live` (docker exec tcpdump -U -w - on tun0 | Wireshark -k -i -).
+  Wireshark 4.6.9 (Developer ID: Wireshark Foundation 7Z6EMTD2C6) showed Burp's page load live:
+  SYN/SYN-ACK, GET / HTTP/1.1, HTTP/1.1 200 OK (text/html), FIN. ChmodBPF and PATH packages
+  not installed and not needed (Wireshark's own "no interfaces" warning is expected).
+- **Wireshark gate PASS.** All MVP tools now proven: terminal, Burp (+MCP read), Wireshark (+tshark text).
+
+## Onboarding notes for the app
+
+- Both Burp and Wireshark were "downloaded but not installed": the user stopped at the DMG.
+  App should offer one Install button per tool: download from the official URL, verify the
+  Developer ID signature (codesign), copy the .app into /Applications, detach the DMG.
+  This installs from the official source; it is not redistribution.
+- Burp's MCP approval prompt and Wireshark's "no interfaces" warning both look like errors to a
+  beginner; the app should pre-empt or explain them.
