@@ -93,6 +93,31 @@ cmd_up() {
   [ "$st" = connected ]
 }
 
+# Set targets and return only once the supervisor has applied them, so the student's next
+# command is never blocked by a scope that is still being installed.
+cmd_target() {
+  local want="" t0
+  if [ "${1:-}" != clear ] && [ $# -gt 0 ]; then want="$*"; fi
+  write_state scope "$(printf '%s\n' "$@" | grep -vx clear)"
+  t0=$(date +%s)
+  while [ $(( $(date +%s) - t0 )) -lt 15 ]; do
+    # Done when every requested address shows up as either accepted or refused.
+    if python3 - "$STATE/status.json" "$want" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+seen = set((d.get("targets", "") + " " + d.get("blocked_targets", "")).split())
+sys.exit(0 if seen == set(sys.argv[2].split()) else 1)
+PY
+    then
+      echo "targets: $(field targets)"
+      [ -z "$(field blocked_targets)" ] || echo "blocked: $(field blocked_targets) - $(field message)"
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "the lab did not confirm the new targets (is it connected?)"; return 1
+}
+
 cmd_capture() {
   local wireshark=/Applications/Wireshark.app/Contents/MacOS/Wireshark out secs f
   case "${1:-live}" in
@@ -127,9 +152,7 @@ case "${1:-status}" in
   up)      shift; cmd_up "${1:-}" ;;
   off)     write_state selected-vpn ""; echo "disconnected" ;;
   status)  python3 -m json.tool "$STATE/status.json" ;;
-  target)  shift
-           if [ "${1:-}" = clear ] || [ $# -eq 0 ]; then write_state scope ""; echo "no targets"
-           else write_state scope "$(printf '%s\n' "$@")"; echo "targets: $*"; fi ;;
+  target)  shift; cmd_target "$@" ;;
   shell)   docker exec -it "$CONTAINER" lab-shell ;;
   history) tail -n "${2:-20}" "$WORKSPACE/logs/commands.jsonl" ;;
   logs)    tail -n "${2:-30}" "$STATE/events.log" ;;

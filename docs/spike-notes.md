@@ -247,3 +247,16 @@ move: ALL PASS, same timings.
   4. Previous session's `exit` was logged as a new command (bash loads history after the
      rcfile). The hook now marks the history end on the first prompt.
 - `make test` = lint + supervisor + scope + shell-log tests. `make test-target` sets the scope first.
+
+## Live target run (2026-10-02, Appointment 10.129.15.47, scope set to it)
+
+- `make test-target`: target-test PASS (nmap 80/tcp open; HTTP 200 via proxy; VPN drop fails;
+  restore 200). kill-switch-test ALL PASS (200; internet blocked; drop fails in 1.08 s; **0**
+  packets leaked on eth0; reconnect 200). Scope + kill switch + supervisor work together.
+- Bug found: the first 2 of 3 pings were rejected by our own scope because `lab target`
+  returned before the supervisor applied it. `lab target` now waits until every requested
+  address is reported as accepted or refused (0.6-3.5 s). UX rule: never return before the
+  lab confirms a change.
+- Machine stopped answering a few minutes later (no replies, nothing rejected locally): machine
+  stopped/expired on HTB's side, after all checks had passed.
+- Repo pushed to github.com/Mateuzas/lab-tool (private), remote via SSH.
