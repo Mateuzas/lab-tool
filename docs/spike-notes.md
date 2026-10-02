@@ -270,3 +270,22 @@ move: ALL PASS, same timings.
   allowed = read `workspace/logs`, `status.json`, Burp history reads; denied = Bash, Write, Edit,
   web, VPN files, every Burp tool that sends or changes anything.
 - Target for the run: 10.129.15.9 (Appointment, respawned), scope set.
+
+## Task 5 first results (2026-10-02): tutor works, model choice matters
+
+- **Finding (product risk): the tutor opening prompt is refused by Opus 5.5's safety classifier**
+  ("help me start" on a scoped HTB target). Same setup on **Opus 4.8** produced a strong tutor
+  response. Do NOT work around classifiers by rewording; treat model/route as a real constraint.
+  Needs Anthropic usage-policy clarification for a security-training product (goes with 6.2).
+- **Tutor run on Opus 4.8 (good):** confirmed scope from status.json; corrected HTB-vs-THM
+  vocabulary; taught the enumerate->investigate->exploit->loot mindset; explained every nmap flag
+  before running; asked the student to PREDICT and to say what they NOTICE before interpreting.
+  Hit teaching rules 1,2,3 and the scope rule. Did not hand answers. (Some words were garbled by
+  the terminal paste, not the model.)
+- **Baseline (generic Opus 5.5, "how do I find open ports"):** technically excellent and safe for
+  a general question - listening vs reachable, per-flag ss breakdown, "only scan machines you own".
+  But NOT a tutor: gave the full answer immediately, no predict-first, no hint ladder, generic not
+  lab-aware. Confirms the CLAUDE.md rules change behaviour; the generic model does not teach.
+- Takeaway: the tutoring design is validated. Open: which model/route the product uses so the
+  first message is never refused. Candidate approaches to compare later: model choice, a system
+  prompt that states the legal-training context up front, and an Anthropic-approved path.
