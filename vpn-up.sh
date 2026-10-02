@@ -30,6 +30,9 @@ if in_kali "grep -nE '^(script-security|up|down|route-up|route-pre-down|plugin|t
 fi
 echo "ok, no hooks"
 
+echo "== kill switch"
+in_kali "sh /lab/kill-switch.sh on '$OVPN'"
+
 echo "== 2.4/2.5 start tunnel"
 if ! in_kali "pkill openvpn || true; sleep 1; openvpn --config '$OVPN' --daemon --log /tmp/ovpn.log"; then
   echo "FAIL: openvpn refused to start. Log:"

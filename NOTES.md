@@ -163,3 +163,26 @@
   This installs from the official source; it is not redistribution.
 - Burp's MCP approval prompt and Wireshark's "no interfaces" warning both look like errors to a
   beginner; the app should pre-empt or explain them.
+
+## Step 2.1: Kill switch (2026-10-02)
+
+- `kill-switch.sh` (in container, iptables + ip6tables OUTPUT): allow lo, tun0, eth0
+  ESTABLISHED/RELATED (proxy replies to the Mac), DNS to Docker's resolver, the VPN server IP on
+  its proto/port from the .ovpn; REJECT everything else (fast failure). IPv6: tun0 only.
+  `vpn-up.sh` turns it on before starting openvpn. `off` exists for maintenance (apt).
+- `kill-switch-test.sh 10.129.14.194 80` (Appointment):
+
+| Check | Kill switch ON | OFF (control) |
+|---|---|---|
+| Target via proxy, VPN up | 200 | 200 |
+| Internet (example.com) via proxy | blocked | **reachable** |
+| VPN dropped: request | fails in 1.09 s | times out after 10 s |
+| VPN dropped: lab packets on eth0 | **0** | **11 leaked** |
+| VPN reconnects | 200 | 200 |
+
+- **Review Focus 2 fixed and proven.** The original 3.6 "pass" (timeout) hid a real leak: 11
+  packets for 10.129.14.194 went to the home router. With the kill switch, none.
+- **Review Focus 5 partly addressed:** non-lab destinations are now blocked at the container.
+  Per-target scope (only the spawned machine) is still to do in the tool server.
+- Known limits: VPN server IP is resolved once at switch-on (a server IP change needs a re-run
+  of vpn-up). DNS queries still reach Docker's resolver (names leak, packets don't).

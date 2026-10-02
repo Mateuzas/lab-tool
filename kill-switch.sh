@@ -1,0 +1,53 @@
+#!/bin/sh
+# Container egress firewall (runs INSIDE the container as root).
+#   kill-switch.sh on <file.ovpn>   lab traffic only via tun0; eth0 only for DNS, the VPN server,
+#                                   and replies to the Mac's proxy connections. All else rejected.
+#   kill-switch.sh off              open egress (maintenance, e.g. apt)
+#   kill-switch.sh status
+set -eu
+
+reset() {
+  for t in iptables ip6tables; do
+    $t -P OUTPUT ACCEPT
+    $t -F OUTPUT
+  done
+}
+
+case "${1:-status}" in
+  on)
+    OVPN=${2:?usage: kill-switch.sh on <file.ovpn>}
+    DNS=$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)
+    HOST=$(awk '/^remote /{print $2; exit}' "$OVPN")
+    PORT=$(awk '/^remote /{print $3; exit}' "$OVPN")
+    PROTO=$(awk '/^proto /{sub(/-client$/, "", $2); print $2; exit}' "$OVPN")
+    PROTO=${PROTO:-udp}
+    IPS=$(getent ahostsv4 "$HOST" | awk '{print $1}' | sort -u)
+    [ -n "$IPS" ] || { echo "kill-switch: cannot resolve $HOST"; exit 1; }
+
+    reset
+    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -o tun0 -j ACCEPT
+    # Replies to connections the Mac opened to the proxy (Burp -> 127.0.0.1:1080 -> eth0).
+    iptables -A OUTPUT -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A OUTPUT -o eth0 -d "$DNS" -p udp --dport 53 -j ACCEPT
+    iptables -A OUTPUT -o eth0 -d "$DNS" -p tcp --dport 53 -j ACCEPT
+    for ip in $IPS; do
+      iptables -A OUTPUT -o eth0 -d "$ip" -p "$PROTO" --dport "$PORT" -j ACCEPT
+    done
+    # Reject (not drop) so a dead tunnel fails instantly instead of timing out.
+    iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+    iptables -P OUTPUT DROP
+
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+    ip6tables -A OUTPUT -o tun0 -j ACCEPT
+    ip6tables -A OUTPUT -j REJECT
+    ip6tables -P OUTPUT DROP
+    echo "kill-switch: on (VPN server $HOST -> $(echo $IPS | tr '\n' ' ')$PROTO/$PORT, DNS $DNS)" ;;
+  off)
+    reset
+    echo "kill-switch: off" ;;
+  status)
+    iptables -S OUTPUT; ip6tables -S OUTPUT ;;
+  *)
+    echo "usage: kill-switch.sh on <file.ovpn> | off | status"; exit 1 ;;
+esac
