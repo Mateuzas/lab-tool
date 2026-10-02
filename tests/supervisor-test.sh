@@ -73,7 +73,7 @@ wait_for connected 30 "reconnected"
 
 echo "== 7. VPN file with script hooks is refused"
 printf 'client\ndev tun\nremote 192.0.2.1 1194\nscript-security 2\nup /bin/evil.sh\n' > "$WS/vpn/zz-hooked-test.ovpn"
-echo zz-hooked-test.ovpn > "$WS/state/selected-vpn"
+docker exec kali-lab sh -c 'echo zz-hooked-test.ovpn > /lab/state/.sel.tmp && mv /lab/state/.sel.tmp /lab/state/selected-vpn'
 wait_for error 10 "hooked file refused"
 rm -f "$WS/vpn/zz-hooked-test.ovpn"
 host/lab up "$FILTER" >/dev/null

@@ -24,7 +24,7 @@ out=$(via_proxy "http://example.com/"); echo "  got: $out"
 echo "== 3. VPN drop: nothing for 10.0.0.0/8 may leave via eth0"
 in_kali 'rm -f /tmp/leak.pcap; (setsid tcpdump -n -i eth0 -w /tmp/leak.pcap "net 10.0.0.0/8" >/dev/null 2>&1 &)'
 sleep 1
-touch "$WS/state/hold"; in_kali 'pkill -x openvpn'; sleep 2
+in_kali 'touch /lab/state/hold'; in_kali 'pkill -x openvpn'; sleep 2
 start=$(python3 -c 'import time; print(time.time())')
 out=$(via_proxy "http://$TARGET:$PORT/")
 secs=$(python3 -c "import time; print(round(time.time()-$start, 2))")
@@ -37,7 +37,7 @@ echo "  packets to 10.0.0.0/8 seen on eth0: $leaked"
 [ "$leaked" -eq 0 ] && check ok "no lab traffic leaked to the host network" || check bad "no lab traffic leaked to the host network"
 
 echo "== 4. VPN reconnects through the kill switch"
-rm -f "$WS/state/hold"
+in_kali 'rm -f /lab/state/hold'
 for _ in $(seq 1 40); do
   grep -q '"state":"connected"' "$WS/state/status.json" 2>/dev/null && break
   sleep 1

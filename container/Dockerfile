@@ -10,6 +10,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --chmod=0755 bin/ /usr/local/bin/
+COPY share/ /usr/local/share/
 
 WORKDIR /lab
 CMD ["lab-supervisor"]

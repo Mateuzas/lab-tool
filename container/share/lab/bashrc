@@ -1,0 +1,21 @@
+# Sourced by lab-shell. Keeps the normal Kali shell, then logs each command after it runs.
+# shellcheck shell=bash disable=SC1090,SC1091
+[ -f ~/.bashrc ] && . ~/.bashrc
+
+HISTCONTROL=     # log every command, including repeats and ones starting with a space
+
+__lab_json() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' <<< "$1"; }
+
+__lab_log() {
+  local rc=$? n cmd
+  read -r n cmd <<< "$(HISTTIMEFORMAT='' history 1)"
+  # Enter on an empty line repeats the last history number: skip it.
+  if [ -n "$n" ] && [ "$n" != "${__lab_last:-}" ]; then
+    __lab_last=$n
+    printf '{"time":"%s","session":"%s","cwd":"%s","exit":%d,"cmd":"%s"}\n' \
+      "$(date -u +%FT%TZ)" "$LAB_SESSION" "$(__lab_json "$PWD")" "$rc" "$(__lab_json "$cmd")" \
+      >> /lab/logs/commands.jsonl
+  fi
+  return $rc
+}
+PROMPT_COMMAND="__lab_log${PROMPT_COMMAND:+; $PROMPT_COMMAND}"

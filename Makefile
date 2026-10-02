@@ -1,6 +1,6 @@
 # Entry points for humans and CI. Run `make help`.
 SHELL := /bin/bash
-SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch $(wildcard tests/*.sh)
+SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh)
 VPN ?= starting
 
 .PHONY: help build up down status lint test test-target clean

@@ -4,6 +4,7 @@
 #                                   and replies to the Mac's proxy connections. All else rejected.
 #   lab-kill-switch block            everything closed (used when the VPN server can't be resolved)
 #   lab-kill-switch off              open egress (maintenance, e.g. apt)
+#   lab-kill-switch scope <gw> [ip...]  allow VPN traffic only to the HTB gateway and these targets
 #   lab-kill-switch status
 set -eu
 
@@ -11,6 +12,17 @@ reset() {
   for t in iptables ip6tables; do
     $t -P OUTPUT ACCEPT
     $t -F OUTPUT
+    $t -F LAB_SCOPE 2>/dev/null || true
+    $t -X LAB_SCOPE 2>/dev/null || true
+  done
+}
+
+# VPN traffic goes through LAB_SCOPE. Until targets are set it only carries replies.
+scope_chain() {
+  for t in iptables ip6tables; do
+    $t -N LAB_SCOPE
+    $t -A LAB_SCOPE -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    $t -A LAB_SCOPE -j REJECT
   done
 }
 
@@ -26,8 +38,9 @@ case "${1:-status}" in
     [ -n "$IPS" ] || { echo "kill-switch: cannot resolve $HOST"; exit 1; }
 
     reset
+    scope_chain
     iptables -A OUTPUT -o lo -j ACCEPT
-    iptables -A OUTPUT -o tun0 -j ACCEPT
+    iptables -A OUTPUT -o tun0 -j LAB_SCOPE
     # Replies to connections the Mac opened to the proxy (Burp -> 127.0.0.1:1080 -> eth0).
     iptables -A OUTPUT -o eth0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
     iptables -A OUTPUT -o eth0 -d "$DNS" -p udp --dport 53 -j ACCEPT
@@ -40,7 +53,7 @@ case "${1:-status}" in
     iptables -P OUTPUT DROP
 
     ip6tables -A OUTPUT -o lo -j ACCEPT
-    ip6tables -A OUTPUT -o tun0 -j ACCEPT
+    ip6tables -A OUTPUT -o tun0 -j LAB_SCOPE   # scope is IPv4-only for now: IPv6 gets replies only
     ip6tables -A OUTPUT -j REJECT
     ip6tables -P OUTPUT DROP
     echo "kill-switch: on (VPN server $HOST -> $(echo $IPS | tr '\n' ' ')$PROTO/$PORT, DNS $DNS)" ;;
@@ -58,11 +71,23 @@ case "${1:-status}" in
     ip6tables -A OUTPUT -j REJECT
     ip6tables -P OUTPUT DROP
     echo "kill-switch: block (all egress closed)" ;;
+  scope)
+    GW=${2:?usage: lab-kill-switch scope <gw> [ip...]}
+    shift 2
+    iptables -S LAB_SCOPE >/dev/null 2>&1 || { echo "kill-switch: not on"; exit 1; }
+    iptables -F LAB_SCOPE
+    iptables -A LAB_SCOPE -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    iptables -A LAB_SCOPE -d "$GW" -j ACCEPT
+    for ip in "$@"; do
+      iptables -A LAB_SCOPE -d "$ip" -j ACCEPT
+    done
+    iptables -A LAB_SCOPE -j REJECT --reject-with icmp-admin-prohibited
+    echo "kill-switch: scope gateway $GW, targets: ${*:-none}" ;;
   off)
     reset
     echo "kill-switch: off" ;;
   status)
-    iptables -S OUTPUT; ip6tables -S OUTPUT ;;
+    iptables -S OUTPUT; iptables -S LAB_SCOPE 2>/dev/null; ip6tables -S OUTPUT ;;
   *)
-    echo "usage: lab-kill-switch on <file.ovpn> | block | off | status"; exit 1 ;;
+    echo "usage: lab-kill-switch on <file.ovpn> | block | scope <gw> [ip...] | off | status"; exit 1 ;;
 esac

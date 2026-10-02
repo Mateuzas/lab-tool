@@ -7,6 +7,8 @@
 #   /lab/vpn/*.ovpn           the student's VPN files
 #   /lab/state/selected-vpn   basename of the .ovpn to use (empty/missing = stay disconnected)
 #   /lab/state/hold           if present, do not restart the VPN (used by drop tests)
+#   /lab/state/scope          target IPs the student spawned (one per line); VPN traffic is
+#                             allowed only to these and the HTB gateway
 set -u
 
 STATE=/lab/state
@@ -18,6 +20,7 @@ HOOKS='^(script-security|up|down|route-up|route-pre-down|ipchange|plugin|tls-ver
 mkdir -p "$STATE"
 
 vpn_pid=""; current=""; vpn_started=0; restarts=0; gw_fails=0; ever_connected=""
+scope_sig=""; scope_ok=""; scope_bad=""
 state=starting; message="Starting the lab"; state_since=$(date +%s); gateway_ms=""; refused=""
 
 log() { echo "$(date -u +%FT%TZ) $*" >> "$EVENTS"; }
@@ -38,9 +41,9 @@ write_status() {
   elif iptables -S OUTPUT 2>/dev/null | grep -q REJECT; then ks=block
   else ks=off; fi
   [ -n "$current" ] && server=$(awk '/^remote /{print $2; exit}' "$VPN_DIR/$current" 2>/dev/null)
-  printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
+  printf '{"state":"%s","message":"%s","vpn_file":"%s","server":"%s","lab_ip":"%s","gateway_ms":"%s","proxy":"%s","kill_switch":"%s","targets":"%s","blocked_targets":"%s","vpn_restarts":%d,"state_since":%d,"updated":%d}\n' \
     "$state" "$message" "$current" "$server" "$lab_ip" "$gateway_ms" "$proxy" "$ks" \
-    "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
+    "$scope_ok" "$scope_bad" "$restarts" "$state_since" "$(date +%s)" > "$STATUS.tmp" && mv "$STATUS.tmp" "$STATUS"
 }
 
 stop_vpn() {
@@ -66,6 +69,31 @@ ensure_kill_switch() {
       return 1
     fi
     log "kill switch on"
+    scope_sig=""   # fresh chain: scope must be re-applied
+  fi
+}
+
+# Allow VPN traffic only to the gateway and the student's own targets. A target counts only if
+# the kernel would route it through the VPN, so typos and internet addresses are refused.
+ensure_scope() {
+  local gw=$1 ip ok="" bad="" sig
+  while read -r ip || [ -n "$ip" ]; do   # also read a last line without a newline
+    [ -n "$ip" ] || continue
+    if grep -qE '^([0-9]{1,3}\.){3}[0-9]{1,3}$' <<< "$ip" \
+       && ip route get "$ip" 2>/dev/null | grep -q 'dev tun0'; then
+      ok="$ok $ip"
+    else
+      bad="$bad $ip"
+    fi
+  done < <(tr -s ' ,\t' '\n' < "$STATE/scope" 2>/dev/null)
+  scope_ok=${ok# }; scope_bad=${bad# }
+  sig="$gw|$scope_ok"
+  if [ "$sig" != "$scope_sig" ]; then
+    # shellcheck disable=SC2086  # one argument per target is intended
+    if lab-kill-switch scope "$gw" $scope_ok >/dev/null; then
+      scope_sig=$sig
+      log "scope: gateway $gw, targets: ${scope_ok:-none}${scope_bad:+, refused: $scope_bad}"
+    fi
   fi
 }
 
@@ -131,6 +159,7 @@ while true; do
 
     gw=$(ip route 2>/dev/null | awk '/ via .* dev tun0/{print $3; exit}')
     if [ -n "$gw" ]; then
+      ensure_scope "$gw"
       gateway_ms=$(ping -c 1 -W 2 "$gw" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p')
     else
       gateway_ms=""
@@ -138,7 +167,13 @@ while true; do
 
     if [ -n "$gateway_ms" ]; then
       gw_fails=0; ever_connected=yes
-      set_state connected "Connected to the lab."
+      if [ -n "$scope_bad" ]; then
+        set_state connected "Connected. $scope_bad is not a lab address, so it stays blocked."
+      elif [ -z "$scope_ok" ]; then
+        set_state connected "Connected. Pick the machine you spawned to start."
+      else
+        set_state connected "Connected. Target: $scope_ok"
+      fi
     elif vpn_alive; then
       err=$(classify_error)
       gw_fails=$((gw_fails + 1))

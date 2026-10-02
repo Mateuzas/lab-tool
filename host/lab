@@ -5,7 +5,9 @@
 #   lab up [filter]            connect with the .ovpn in workspace/vpn/ matching filter
 #   lab off                    disconnect (all egress stays blocked)
 #   lab status                 print workspace/state/status.json
-#   lab shell                  open a terminal in the container
+#   lab target <ip> [ip...]    allow lab traffic only to machines you spawned (lab target clear)
+#   lab shell                  open the student terminal (commands are logged for the tutor)
+#   lab history [n]            last n logged commands
 #   lab logs                   supervisor events
 #   lab capture live           stream lab traffic into Wireshark
 #   lab capture save [secs]    save to workspace/captures/<time>.pcap (default 30 s)
@@ -20,7 +22,19 @@ WORKSPACE=${LAB_WORKSPACE:-$ROOT/workspace}
 IMAGE=${LAB_IMAGE:-kali-lab:dev}
 CONTAINER=kali-lab
 STATE=$WORKSPACE/state
-mkdir -p "$WORKSPACE/vpn" "$STATE" "$WORKSPACE/captures"
+mkdir -p "$WORKSPACE/vpn" "$STATE" "$WORKSPACE/captures" "$WORKSPACE/logs"
+
+# Control state is written from INSIDE the container (atomic temp + rename). Docker Desktop's
+# file sharing can serve a stale copy of a Mac-side change for 30 s+, so the shared folder is
+# only used for data, never for commands. Falls back to a local write if the container is down.
+write_state() {
+  if docker exec kali-lab true 2>/dev/null; then
+    printf '%s\n' "$2" | docker exec -i kali-lab sh -c \
+      "cat > /lab/state/.$1.tmp && mv /lab/state/.$1.tmp /lab/state/$1"
+  else
+    printf '%s\n' "$2" > "$STATE/.$1.tmp" && mv "$STATE/.$1.tmp" "$STATE/$1"
+  fi
+}
 
 field() {
   python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get(sys.argv[2],""))' \
@@ -65,8 +79,8 @@ cmd_up() {
   fi
   sel=$(basename "$matches")
   t0=$(date +%s)
-  echo "$sel" > "$STATE/selected-vpn"
   ensure_container
+  write_state selected-vpn "$sel"
   echo "using $sel"
   for _ in $(seq 1 30); do
     if [ "$(field vpn_file)" = "$sel" ] && [ "$(field updated)" -gt "$t0" ]; then
@@ -111,11 +125,15 @@ cmd_burp() {
 case "${1:-status}" in
   build)   cmd_build ;;
   up)      shift; cmd_up "${1:-}" ;;
-  off)     : > "$STATE/selected-vpn"; echo "disconnected" ;;
+  off)     write_state selected-vpn ""; echo "disconnected" ;;
   status)  python3 -m json.tool "$STATE/status.json" ;;
-  shell)   docker exec -it "$CONTAINER" bash ;;
+  target)  shift
+           if [ "${1:-}" = clear ] || [ $# -eq 0 ]; then write_state scope ""; echo "no targets"
+           else write_state scope "$(printf '%s\n' "$@")"; echo "targets: $*"; fi ;;
+  shell)   docker exec -it "$CONTAINER" lab-shell ;;
+  history) tail -n "${2:-20}" "$WORKSPACE/logs/commands.jsonl" ;;
   logs)    tail -n "${2:-30}" "$STATE/events.log" ;;
   capture) shift; cmd_capture "$@" ;;
   burp)    cmd_burp ;;
-  *)       sed -n '2,15p' "$0"; exit 1 ;;
+  *)       sed -n '2,17p' "$0"; exit 1 ;;
 esac
