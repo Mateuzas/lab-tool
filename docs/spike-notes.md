@@ -225,3 +225,25 @@ capture.sh), `tests/`, `tools/`, `docs/`, and gitignored `workspace/` (vpn/, sta
 now the ONLY mount (`/lab`), so the container can no longer see or modify the code. `make help`
 lists entry points; `make lint` (ShellCheck in Docker) is clean. Supervisor test re-run after the
 move: ALL PASS, same timings.
+
+## Step 2.3: Scope check + command log (2026-10-02)
+
+- **Scope:** VPN traffic goes through iptables chain `LAB_SCOPE`: replies, the HTB gateway
+  (health check) and the targets in `state/scope` only. A target is accepted only if the kernel
+  routes it via tun0, so internet IPs and typos are refused with a plain message. IPv6 on tun0:
+  replies only for now. `host/lab target <ip>` / `target clear`.
+- `tests/scope-test.sh` (no machine needed, proves via tcpdump on tun0), ALL PASS: 8.8.8.8
+  refused; "10.129.14" refused; in-scope 10.129.14.194 -> 5 packets out; out-of-scope
+  10.129.14.195 -> **0 packets**; gateway health fine with empty scope.
+- **Command log:** `lab-shell` = `script` transcript (`logs/session-*.log`) + bash hook writing
+  `logs/commands.jsonl` (time, session, cwd after the command, exit code, command).
+  `tests/shell-log-test.sh` passes 3x in a row.
+- Bugs found and fixed on the way (each would have silently broken logging/scope):
+  1. **Docker Desktop file sharing served a stale copy of Mac-side edits for 30 s+.** Control
+     state is now written via `docker exec` (0.07 s). Shared folder = data only.
+  2. `while read` skipped a last line without newline -> scope always empty.
+  3. Kali's `.bashrc` sets `PROMPT_COMMAND="PROMPT_COMMAND=echo"`, which deletes any hook
+     after the first prompt. Reproduced its blank-line behaviour inside our hook.
+  4. Previous session's `exit` was logged as a new command (bash loads history after the
+     rcfile). The hook now marks the history end on the first prompt.
+- `make test` = lint + supervisor + scope + shell-log tests. `make test-target` sets the scope first.

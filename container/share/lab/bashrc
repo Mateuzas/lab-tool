@@ -9,6 +9,12 @@ __lab_json() { sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' <<< "$1"; }
 __lab_log() {
   local rc=$? n cmd
   read -r n cmd <<< "$(HISTTIMEFORMAT='' history 1)"
+  # First prompt: bash has just loaded earlier sessions' history (after this rcfile ran).
+  # Remember where it ends so only commands typed from now on are logged.
+  if [ -z "${__lab_ready:-}" ]; then
+    __lab_ready=1; __lab_last=$n
+    return $rc
+  fi
   # Enter on an empty line repeats the last history number: skip it.
   if [ -n "$n" ] && [ "$n" != "${__lab_last:-}" ]; then
     __lab_last=$n
@@ -18,4 +24,13 @@ __lab_log() {
   fi
   return $rc
 }
-PROMPT_COMMAND="__lab_log${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+# Kali's .bashrc sets PROMPT_COMMAND="PROMPT_COMMAND=echo" (blank line between prompts, not
+# before the first). Run as-is that replaces the whole PROMPT_COMMAND, hook included, after the
+# first prompt, so reproduce the behaviour here instead.
+if [ "${PROMPT_COMMAND:-}" = "PROMPT_COMMAND=echo" ]; then
+  __lab_first=1
+  __lab_newline() { if [ -n "${__lab_first:-}" ]; then __lab_first=""; else echo; fi; }
+  PROMPT_COMMAND="__lab_log; __lab_newline"
+else
+  PROMPT_COMMAND="__lab_log${PROMPT_COMMAND:+; $PROMPT_COMMAND}"
+fi

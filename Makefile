@@ -23,11 +23,14 @@ status: ## show lab status
 lint: ## shellcheck every script (no local install needed)
 	docker run --rm -v "$(CURDIR)":/mnt:ro -w /mnt koalaman/shellcheck:stable -S warning $(SCRIPTS)
 
-test: lint ## lint + supervisor fault-injection test (no target machine needed)
+test: lint ## lint + all tests that need no target machine (lab must be connected)
 	tests/supervisor-test.sh $(VPN)
+	tests/scope-test.sh
+	tests/shell-log-test.sh
 
 test-target: ## kill switch + proxy tests against a spawned machine: make test-target TARGET=10.129.x.x
 	@test -n "$(TARGET)" || { echo "usage: make test-target TARGET=<ip of a machine you spawned>"; exit 1; }
+	host/lab target $(TARGET)
 	tests/target-test.sh $(TARGET) $(or $(PORT),80)
 	tests/kill-switch-test.sh $(TARGET) $(or $(PORT),80)
 
