@@ -9,6 +9,13 @@ RUN apt-get update \
       tcpdump tshark iptables \
  && rm -rf /var/lib/apt/lists/*
 
+# Service clients from the agreed MVP tool list (docs/spike-notes.md): the everyday ways a
+# beginner talks to a lab machine's services.
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      openssh-client netcat-openbsd telnet ftp smbclient redis-tools default-mysql-client \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY --chmod=0755 bin/ /usr/local/bin/
 COPY share/ /usr/local/share/
 

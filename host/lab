@@ -13,6 +13,7 @@
 #   lab capture save [secs]    save to workspace/captures/<time>.pcap (default 30 s)
 #   lab capture summary <file> text summary of a capture (what the tutor reads)
 #   lab burp                   launch Burp pre-configured to use the lab proxy
+#   lab doctor [tool...]       read-only health report (Docker, lab, tools); safe for the tutor
 #
 # Environment: LAB_WORKSPACE (default <repo>/workspace), LAB_IMAGE (default kali-lab:dev)
 set -euo pipefail
@@ -147,8 +148,55 @@ cmd_burp() {
     --config-file="$ROOT/host/burp/project-options.json"
 }
 
+# Read-only health report of the student's own setup. The tutor may run this one command.
+# It never sends anything to the lab: no network commands, no installs, no changes.
+DOCTOR_TOOLS=(ssh nc telnet ftp smbclient redis-cli mysql curl nmap openvpn tcpdump tshark)
+cmd_doctor() {
+  local t tools
+  # No tools named: check the standard set. (bash 3.2 on macOS treats an empty array as unbound.)
+  if [ $# -eq 0 ]; then tools=("${DOCTOR_TOOLS[@]}"); else tools=("$@"); fi
+  for t in "${tools[@]}"; do
+    [[ "$t" =~ ^[A-Za-z0-9._+-]{1,40}$ ]] || { echo "doctor: '$t' isn't a tool name"; exit 1; }
+  done
+
+  echo "== Docker"
+  if ! docker info >/dev/null 2>&1; then echo "not running: start Docker Desktop"; return 0; fi
+  echo "running (engine $(docker version --format '{{.Server.Version}}'))"
+
+  echo "== Lab container"
+  if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then echo "missing: run 'make build'"; return 0; fi
+  docker inspect "$CONTAINER" --format 'state={{.State.Status}} image={{.Config.Image}} since={{.State.StartedAt}}'
+  if [ "$(docker inspect "$CONTAINER" --format '{{.State.Running}}')" != true ]; then return 0; fi
+
+  echo "== Lab status"
+  docker exec "$CONTAINER" cat /lab/state/status.json 2>/dev/null | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for k in ("state", "message", "vpn_file", "lab_ip", "gateway_ms", "proxy", "kill_switch", "targets", "blocked_targets", "vpn_restarts"):
+    print(k + ": " + str(d.get(k, str())))' || echo "no status yet"
+
+  echo "== Recent lab events"
+  docker exec "$CONTAINER" tail -n 8 /lab/state/events.log 2>/dev/null || echo "none"
+
+  echo "== Tools in the lab"
+  docker exec "$CONTAINER" sh -c 'for t in "$@"; do printf "%-12s %s\n" "$t" "$(command -v "$t" || echo MISSING)"; done' sh "${tools[@]}"
+
+  echo "== Network interfaces (nothing is sent)"
+  docker exec "$CONTAINER" ip -br addr | grep -E '^(lo|eth0|tun0)[@ ]' || true
+
+  echo "== Image"
+  docker image ls "$IMAGE" --format '{{.Repository}}:{{.Tag}} {{.Size}} built {{.CreatedSince}}'
+
+  echo "== Mac apps"
+  for t in "Burp Suite" "Burp Suite Community Edition" "Wireshark"; do
+    [ -d "/Applications/$t.app" ] && echo "$t: installed"
+  done
+  return 0
+}
+
 case "${1:-status}" in
   build)   cmd_build ;;
+  doctor)  shift; cmd_doctor "$@" ;;
   up)      shift; cmd_up "${1:-}" ;;
   off)     write_state selected-vpn ""; echo "disconnected" ;;
   status)  python3 -m json.tool "$STATE/status.json" ;;
@@ -158,5 +206,5 @@ case "${1:-status}" in
   logs)    tail -n "${2:-30}" "$STATE/events.log" ;;
   capture) shift; cmd_capture "$@" ;;
   burp)    cmd_burp ;;
-  *)       sed -n '2,17p' "$0"; exit 1 ;;
+  *)       sed -n '2,18p' "$0"; exit 1 ;;
 esac

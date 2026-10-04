@@ -336,3 +336,15 @@ move: ALL PASS, same timings.
 - Costs to decide: Apple Developer Program ($99/yr) for signing + notarization (else Gatekeeper
   warnings); macOS runner minutes count 10x on private repos; GHCR private storage 500 MB free
   vs 633 MB image; Windows signing later. Decisions pending: repo public/private, Apple signing.
+
+## Tutor diagnostics + missing clients (2026-10-04)
+
+- Bug: `ssh htb-student@...` -> exit 127. The agreed MVP service clients were never added to the
+  image. Dockerfile now installs openssh-client, netcat-openbsd, telnet, ftp, smbclient,
+  redis-tools, default-mysql-client (image 633 MB -> 943 MB; trim later). Needs `make build`.
+- `host/lab doctor [tool...]`: read-only report (Docker, container, lab status, recent events,
+  tools present via `command -v`, interfaces, image, Mac apps). No network, installs or changes;
+  tool names validated. bash 3.2 empty-array pitfall fixed.
+- Tutor may now run only `../host/lab doctor` (allow-list) with `defaultMode: dontAsk`, so any
+  other command is refused automatically. Verified with real Claude Code runs: doctor allowed
+  (found ssh missing); `ls /` denied.
