@@ -27,6 +27,16 @@ async fn add_vpn_file(name: String, content: String) -> Result<lab::VpnFile, Str
 }
 
 #[tauri::command]
+async fn start_lab() -> Result<(), String> {
+    lab::start_lab().await
+}
+
+#[tauri::command]
+async fn stop_lab() -> Result<(), String> {
+    lab::stop_lab().await
+}
+
+#[tauri::command]
 async fn disconnect() -> Result<(), String> {
     lab::disconnect().await
 }
@@ -141,7 +151,7 @@ pub fn run() {
         .manage(term::Terminals::default())
         .manage(tools::Tools::default())
         .invoke_handler(tauri::generate_handler![
-            lab_status, vpn_files, connect, disconnect, set_target, add_vpn_file,
+            lab_status, vpn_files, connect, disconnect, set_target, add_vpn_file, start_lab, stop_lab,
             term_open, term_attach, term_popout, term_dock, term_write, term_resize, term_close,
             burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
             claude_status, open_tutor

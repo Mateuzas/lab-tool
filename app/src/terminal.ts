@@ -142,27 +142,66 @@ export function setupTerminal(reveal: () => void) {
   let counter = 0;
   let gate: TermGate = "no-lab";
   let started = false;
+  let renaming: View | null = null;
 
   const live = (v: View) => v.id !== null && v.ended === null;
+
+  /** Rename a terminal: double-click its tab or press F2. Enter keeps the name, Escape cancels. */
+  function nameInput(v: View) {
+    const input = document.createElement("input");
+    input.className = "term-rename";
+    input.value = v.title;
+    input.maxLength = 24;
+    input.setAttribute("aria-label", "Terminal name");
+    let done = false;
+    const finish = (keep: boolean) => {
+      if (done) return;
+      done = true;
+      const name = input.value.trim();
+      if (keep && name) v.title = name;
+      renaming = null;
+      drawTabs();
+      if (!v.ended) v.term.focus();
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") finish(true);
+      else if (e.key === "Escape") finish(false);
+      e.stopPropagation();
+    });
+    input.addEventListener("blur", () => finish(true));
+    queueMicrotask(() => { input.focus(); input.select(); });
+    return input;
+  }
 
   function drawTabs() {
     strip.replaceChildren(...views.map((v) => {
       const item = document.createElement("div");
       item.className = "term-tab";
-      const pick = document.createElement("button");
-      pick.type = "button";
-      pick.textContent = v.title;
-      if (v === active) pick.setAttribute("aria-current", "true");
-      pick.addEventListener("click", () => select(v));
       const close = document.createElement("button");
       close.type = "button";
       close.className = "term-close";
       close.textContent = "×";
       close.setAttribute("aria-label", `Close ${v.title}`);
       close.addEventListener("click", () => closeView(v));
+      if (v === renaming) {
+        item.dataset.renaming = "";
+        item.append(nameInput(v), close);
+        return item;
+      }
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "term-name";
+      pick.textContent = v.title;
+      pick.title = "Double-click to rename";
+      if (v === active) pick.setAttribute("aria-current", "true");
+      pick.addEventListener("click", () => select(v));
+      pick.addEventListener("dblclick", () => { select(v); renaming = v; drawTabs(); });
+      pick.addEventListener("keydown", (e) => { if (e.key === "F2") { select(v); renaming = v; drawTabs(); } });
       item.append(pick, close);
       return item;
     }));
+    // Many tabs scroll inside the strip; keep the active one in view.
+    strip.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
     $<HTMLButtonElement>("term-new").disabled = gate !== "ready";
     $<HTMLButtonElement>("term-pop").disabled = !(active && live(active));
   }

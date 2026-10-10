@@ -278,3 +278,52 @@ path is the repo's; a packaged app will need its own copy of the tutor config.
 - Built: "Add VPN file" (empty state main button) and "Add a VPN file" text button; confirmation
   and errors reuse the strip's status line. Self-critique: the text button inherited the strip's
   button min-width (looked indented); selection now only changes to a file that is listed.
+
+## Pass 7 (2026-10-02): rename, tab overflow, button roles
+
+- Rename a terminal: double-click its tab or press F2; Enter keeps, Escape cancels, max 24
+  characters. A pop-out window keeps the name it had when popped out.
+- The tab strip is one line that scrolls sideways when full (active tab kept in view); the two
+  buttons never move. Before, tabs wrapped and pushed the buttons around.
+- **New terminal** is the filled primary button with a plus; **Pop out** is an outline button
+  with a leave-the-box arrow, so the two read as different kinds of action.
+- Each terminal is its own `lab-shell` process (own transcript and own `LAB_SESSION`). Fixed:
+  the transcript name was timestamp-to-the-second only, so two terminals opened in the same
+  second wrote to the same file; it now ends in the shell's pid. Needs an image rebuild
+  (`make build`) to take effect.
+
+## Pass 8 (2026-10-10): two modes, Lab and Bug bounty
+
+Idea (client): like a trading platform's training vs real account. Two separate "apps" in one
+window. Only one runs at a time; launching one fully stops the other, so containers, proxies and
+VPNs can never collide. Each has a Launch button and its own accent colour.
+
+```
+ ▪ Lab  Running   ▪ Bug bounty  Stopped          <- dark mode strip (always visible)
+ ───────────────────────────────────────────
+ Lab  Terminal  Burp  Wireshark  Claude    ● Connected      <- the running mode's own tabs
+```
+Viewing is not running: clicking a mode shows it; its launch screen (heading, one sentence,
+state, one button, one tip: the Burp/Wireshark pattern) appears until that mode is the one
+running. A stopped lab shows the Lab launch screen; Bug bounty has no app yet, so it is always
+a launch screen ("work in progress").
+
+- **Identity by colour:** Lab accent stays Argo teal `#006f8a`; Bug bounty is violet `#6b46c1`
+  (white text 6.4:1). The accent token `--cta` is swapped per mode, so buttons, the active tab,
+  focus rings and the terminal focus border all change together. Status colours (green/blue/red)
+  keep their meaning in both modes.
+- **Strip colours:** dark slate `#363c4a` (Argo gray-8) with lighter swatches (teal `#1fbdd0`,
+  violet `#a995f0`) so both stay ≥4:1 on it. Active mode: white text + 3px underline in its colour.
+- **Stopping a running lab asks first** (inline, not a pop-up): "This stops the lab: its VPN
+  connection, its proxy and any open lab terminals." Stopping Bug bounty (nothing to lose yet) doesn't.
+- Launching Lab restarts the container; the supervisor reconnects the last VPN and target.
+- Review against defaults: a tab strip of identical pills would have been the default;
+  the dark strip + coloured swatch reads as "which environment am I in", which is the job.
+- Built (2026-10-10): mode strip + launch screens (`app/src/modes.ts`), `start_lab` / `stop_lab`
+  commands (lab.rs). Self-critique from screenshots of every step (running lab -> view bug
+  bounty -> confirm -> stopping -> running -> stopped lab -> relaunch, plus 560 px): flow correct;
+  the preview mock defined its "stopped" scenario too late (fixed). A test keeps the UI's
+  "Lab stopped" match in step with the Rust status title (negative control verified).
+- Known limits: Bug bounty has no backend (its "running" is a UI flag); Burp stays open when the
+  lab stops (it's the user's own project, we don't close it) but its proxy now points at nothing;
+  the mode on screen isn't remembered across app restarts (always opens on Lab).

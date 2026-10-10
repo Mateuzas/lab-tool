@@ -194,21 +194,39 @@ h1 {
   gap: 10px;
   align-items: start;
 }
-/* A quiet text button under the network picker ("Add a VPN file"). */
-button.link {
+/* "Add a VPN file": a dashed outline is an empty slot waiting for something. It stays secondary
+   to Connect (outline, not fill) and firms up on hover so it reads as a button, not a label. */
+.strip button.add {
   grid-column: 1;
   justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
   height: auto;
-  padding: 2px 0;
-  border: 0;
-  background: none;
+  min-height: 36px;
+  padding: 0 14px 0 12px;
+  border: 1.5px dashed var(--rule);
+  border-radius: 8px;
+  background: transparent;
   color: var(--cta);
-  font-weight: 700;
   font-size: var(--s-small);
+  text-align: left;
+  transition: border-color 0.12s, background-color 0.12s;
 }
-.strip button.link { min-width: 0; text-align: left; }
-button.link:hover { text-decoration: underline; }
-button.link[hidden] { display: none; }
+/* The plus is two bars, so it inherits the text colour and stays crisp at any size. */
+.strip button.add::before {
+  content: "";
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background:
+    linear-gradient(currentColor, currentColor) center / 100% 2px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 2px 100% no-repeat;
+}
+.strip button.add:not(:disabled):hover { border-style: solid; border-color: var(--cta); background: color-mix(in srgb, var(--cta) 7%, transparent); }
+.strip button.add[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .strip button.add { transition: none; } }
 .strip-note { grid-column: 1 / -1; margin: 0; min-height: 1.45em; font-size: var(--s-small); color: var(--ink-soft); }
 .strip-note[data-kind="ok"] { color: var(--go); }
 .strip-note[data-kind="error"] { color: var(--stop); }
@@ -243,6 +261,21 @@ button {
 }
 button.primary { background: var(--cta); border-color: var(--cta); color: var(--cta-text); }
 button:disabled { opacity: 0.4; cursor: default; }
+/* Wheel inside the button, left of its label: the press was received and the lab is working. */
+button.spinning { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
+button.spinning::before {
+  content: "";
+  flex: none;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+button.spinning:disabled { opacity: 0.85; } /* disabled only to block double presses; keep it readable */
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { button.spinning::before { animation: none; border-top-color: currentColor; border-right-color: transparent; } }
 button:not(:disabled):active { transform: translateY(1px); }
 
 :focus-visible { outline: 2px solid var(--cta); outline-offset: 2px; }
@@ -305,18 +338,24 @@ button:not(:disabled):active { transform: translateY(1px); }
 /* The panel's border shows focus; xterm's own box would double it. */
 .term-host :focus-visible { outline: none; }
 
-/* Terminal tabs: a bar above the black panel. The active tab is filled black so it reads as part of the panel. */
+/* Terminal tabs: a bar above the black panel. The active tab is filled black so it reads as part of the panel.
+   The tab strip scrolls sideways when full; the two buttons keep their place on the right. */
 .term-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.term-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
-.term-strip { display: flex; gap: 6px; flex-wrap: wrap; margin-right: auto; }
-.term-tab { display: flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--field); }
+.term-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.term-strip { flex: 1 1 0; min-width: 0; display: flex; gap: 6px; padding: 3px; overflow-x: auto; scrollbar-width: thin; }
+.term-tab { flex: none; display: flex; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; background: var(--field); }
 .term-tab button { height: 36px; border: 0; border-radius: 0; font-weight: 400; color: var(--ink-soft); }
+.term-tab .term-name { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .term-tab button[aria-current="true"] { background: #000; color: #fff; font-weight: 700; }
 .term-tab .term-close { padding: 0 11px; font-size: 1.15em; line-height: 1; }
 .term-tab button:not([aria-current="true"]):hover { color: var(--ink); background: var(--paper); }
-.term-tab:has(button[aria-current="true"]) { border-color: #000; }
+.term-tab:has(button[aria-current="true"]), .term-tab[data-renaming] { border-color: #000; }
 .term-tab:has(button[aria-current="true"]) .term-close { background: #000; color: #c7c7c7; }
-.term-bar > button { height: 36px; padding: 0 14px; font-weight: 400; }
+.term-rename { width: 16ch; height: 36px; border: 0; border-radius: 0; background: #000; color: #fff; font-weight: 700; }
+.term-tab[data-renaming] .term-close { background: #000; color: #c7c7c7; }
+.term-bar > button { flex: none; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; }
+.term-bar > .primary { min-width: 0; }
+#term-pop { font-weight: 400; }
 #term-dock { display: none; }
 #term-error { margin-bottom: 10px; }
 
@@ -326,3 +365,57 @@ body.popout main { width: 100%; padding: 10px; }
 body.popout .term-bar { justify-content: flex-end; }
 body.popout .term-strip, body.popout #term-new, body.popout #term-pop { display: none; }
 body.popout #term-dock { display: block; }
+
+/* ---------- Modes: Lab and Bug bounty (docs/design.md pass 8) ---------- */
+/* Each mode has its own accent. Swapping --cta recolours buttons, the active tab, focus rings
+   and the terminal's focus border together. Status colours keep their meaning in both. */
+:root { --mode-lab: #006f8a; --mode-bounty: #6b46c1; }
+body { --cta: var(--mode-lab); }
+body[data-mode="bounty"] { --cta: var(--mode-bounty); }
+
+.modes { background: var(--ink); }
+.modes-inner {
+  width: var(--column);
+  margin-inline: auto;
+  display: flex;
+  gap: clamp(4px, 1vw, 12px);
+}
+.modes .mode {
+  --swatch: #1fbdd0;                 /* light enough for the dark strip (argo teal-5) */
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: auto;
+  padding: 11px 14px 9px;
+  margin-inline: -14px 0;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: #c3ced6;
+  font-weight: 400;
+}
+.modes .mode + .mode { margin-inline: 0; }
+.modes .mode[data-mode="bounty"] { --swatch: #a995f0; }
+.modes .mode[aria-pressed="true"] { color: #fff; border-bottom-color: var(--swatch); }
+.modes .mode:not([aria-pressed="true"]):hover { color: #fff; }
+.modes .mode:focus-visible { outline-color: #fff; outline-offset: -4px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--swatch); flex: none; }
+.mode-name { font-weight: 700; }
+.mode-state { font-size: var(--s-small); color: #a9bac5; }
+.mode-state[data-state="running"] { color: #8fd9b5; }
+
+/* Launch screen: replaces the lab's tabs while the mode on screen isn't running. */
+#launch { display: none; }
+body[data-view="launch"] #launch { display: flex; }
+body[data-view="launch"] .bar,
+body[data-view="launch"] #app-main { display: none; }
+body.popout .modes, body.popout #launch { display: none; }
+
+.confirm { margin-top: 4px; max-width: 56ch; }
+.confirm[hidden] { display: none; }
+.confirm p { margin: 0 0 12px; }
+.confirm-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+.confirm .primary { min-width: 0; padding-inline: 18px; }
+.confirm-buttons button:not(.primary) { min-width: 120px; }
+#launch-action[hidden] { display: none; }

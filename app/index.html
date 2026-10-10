@@ -7,6 +7,20 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
+    <!-- Modes: Lab and Bug bounty are separate apps. Only one runs; launching one stops the other. -->
+    <nav class="modes" aria-label="Mode">
+      <div class="modes-inner">
+        <button type="button" class="mode" id="mode-lab" data-mode="lab" aria-pressed="true">
+          <span class="swatch" aria-hidden="true"></span><span class="mode-name">Lab</span>
+          <span class="mode-state" id="mode-lab-state" data-state="checking">Checking</span>
+        </button>
+        <button type="button" class="mode" id="mode-bounty" data-mode="bounty" aria-pressed="false">
+          <span class="swatch" aria-hidden="true"></span><span class="mode-name">Bug bounty</span>
+          <span class="mode-state" id="mode-bounty-state" data-state="stopped">Stopped</span>
+        </button>
+      </div>
+    </nav>
+
     <!-- One bar on every tab: sections on the left, connection state on the right. -->
     <header class="bar">
       <div class="bar-inner">
@@ -21,7 +35,7 @@
       </div>
     </header>
 
-    <main>
+    <main id="app-main">
       <!-- Lab: one centred block. Status, route, one control strip. -->
       <section class="panel lab" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab">
         <div class="block">
@@ -56,7 +70,7 @@
                 Download your VPN file from HTB (Connect to HTB, then OpenVPN), then add it here.
               </p>
               <button type="submit" class="primary" id="primary" disabled>Connect</button>
-              <button type="button" class="link" id="add-vpn" hidden>Add a VPN file</button>
+              <button type="button" class="add" id="add-vpn" hidden>Add a VPN file</button>
               <input type="file" id="vpn-file" accept=".ovpn" hidden />
               <p class="strip-note" id="network-note" role="status" aria-live="polite"></p>
             </form>
@@ -85,8 +99,14 @@
       <section class="term-wrap" id="panel-terminal" role="tabpanel" aria-labelledby="tab-terminal" hidden>
         <div class="term-bar">
           <div class="term-strip" id="term-strip" role="group" aria-label="Open terminals"></div>
-          <button type="button" id="term-new">New terminal</button>
-          <button type="button" id="term-pop">Pop out</button>
+          <button type="button" class="primary" id="term-new">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 2v12M2 8h12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            New terminal
+          </button>
+          <button type="button" id="term-pop">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M9 2h5v5M14 2 7 9M12 10v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Pop out
+          </button>
           <button type="button" id="term-dock">Move back to the app</button>
         </div>
         <p class="error" id="term-error" role="alert" hidden></p>
@@ -136,6 +156,27 @@
           <p class="tool-state" id="claude-state" data-level="off"><span class="dot" aria-hidden="true"></span><span id="claude-state-text">Checking…</span></p>
           <button type="button" class="primary" id="claude-action" disabled>Open tutor</button>
           <p class="tip" id="claude-tip">Start by telling it which machine you're working on.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Launch screen: shown for a mode that isn't the one running (a stopped lab, or Bug bounty). -->
+    <main class="launch" id="launch">
+      <section class="panel tool">
+        <div class="block">
+          <h1 id="launch-title">Lab</h1>
+          <p class="lead" id="launch-lead"></p>
+          <p class="tool-state" id="launch-state" data-level="off"><span class="dot" aria-hidden="true"></span><span id="launch-state-text"></span></p>
+          <button type="button" class="primary" id="launch-action">Launch</button>
+          <div class="confirm" id="launch-confirm" role="group" aria-labelledby="launch-confirm-text" hidden>
+            <p id="launch-confirm-text"></p>
+            <div class="confirm-buttons">
+              <button type="button" class="primary" id="launch-yes"></button>
+              <button type="button" id="launch-no">Cancel</button>
+            </div>
+          </div>
+          <p class="tip" id="launch-tip"></p>
+          <p class="error" id="launch-error" role="alert" hidden></p>
         </div>
       </section>
     </main>

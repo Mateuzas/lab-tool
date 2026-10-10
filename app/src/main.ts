@@ -5,6 +5,7 @@ import "./styles.css";
 import { invoke } from "@tauri-apps/api/core";
 import { setupPopout, setupTerminal } from "./terminal";
 import { setupTools } from "./tools";
+import { setupModes } from "./modes";
 
 /** Mirrors lab::LabStatus in src-tauri/src/lab.rs. */
 interface LabStatus {
@@ -26,8 +27,12 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 let status: LabStatus | null = null;
 let files: VpnFile[] = [];
 let pending = false; // a connect/disconnect is in flight
+/** From the button press until the lab's status shows the result, so a press never looks ignored. */
+let busy: { kind: "connect" | "switch" | "disconnect"; file: string; since: number } | null = null;
+const BUSY_MAX_MS = 12000; // never spin forever if the status never moves
 let terminal: ReturnType<typeof setupTerminal> | null = null;
 let tools: ReturnType<typeof setupTools> | null = null;
+let modes: ReturnType<typeof setupModes> | null = null;
 
 // All lab data is set with textContent, never as HTML.
 function setText(id: string, text: string) {
@@ -86,9 +91,12 @@ function drawRoute(s: LabStatus) {
 
   const targets = str("targets");
   const blocked = str("blocked_targets");
-  if (blocked) hop("target", "broken", "Blocked");
-  else if (targets && str("lost_targets") && vpnState === "on") hop("target", "broken", "Not answering");
-  else if (targets) hop("target", vpnState === "on" ? "on" : "off", targets, true);
+  if (settlingTarget) hop("target", "wait", "Setting…");
+  else if (blocked) hop("target", "broken", "Blocked");
+  else if (targets && vpnState === "on" && str("lost_targets").split(/\s+/).includes(targets)) hop("target", "broken", "Not answering");
+  else if (targets && vpnState === "on" && str("live_targets").split(/\s+/).includes(targets)) hop("target", "on", targets, true);
+  else if (targets && vpnState === "on") hop("target", "wait", "Checking…"); // set, but nothing has answered yet
+  else if (targets) hop("target", "off", targets, true);
   else hop("target", "off", "Not set");
 }
 
@@ -121,13 +129,28 @@ function drawControls() {
   select.disabled = !labReachable || pending;
   $<HTMLInputElement>("target").disabled = !labReachable;
 
-  // One primary action whose label says what it will do.
+  // One primary action whose label says what it will do. `data-action` is what a press does.
   const active = ["connected", "connecting", "reconnecting", "starting", "error", "offline"].includes(state) && !!current;
-  if (files.length === 0) primary.textContent = "Add VPN file"; // the only next step
-  else if (!active) primary.textContent = "Connect";
-  else if (select.value && select.value !== current) primary.textContent = "Switch network";
-  else primary.textContent = "Disconnect";
-  primary.disabled = !labReachable || pending;
+  const transition = ["connecting", "reconnecting", "starting"].includes(state);
+  if (busy) {
+    const settled = busy.kind === "disconnect" ? state === "disconnected"
+      : current === busy.file && ["connected", "error", "offline"].includes(state);
+    if (settled || Date.now() - busy.since > BUSY_MAX_MS) busy = null;
+  }
+  let action: string, label: string;
+  if (files.length === 0) [action, label] = ["add", "Add VPN file"]; // the only next step
+  else if (busy) [action, label] = ["wait", { connect: "Connecting…", switch: "Switching…", disconnect: "Disconnecting…" }[busy.kind]];
+  else if (!active) [action, label] = ["connect", "Connect"];
+  else if (select.value && select.value !== current) [action, label] = ["switch", "Switch network"];
+  else if (transition) [action, label] = ["disconnect", "Cancel"]; // still dialling: a press stops it
+  else [action, label] = ["disconnect", "Disconnect"];
+  primary.textContent = label;
+  primary.dataset.action = action;
+  const spinning = !!busy || (transition && action === "disconnect");
+  primary.classList.toggle("spinning", spinning);
+  primary.toggleAttribute("aria-busy", spinning);
+  primary.disabled = !labReachable || pending || action === "wait";
+  $<HTMLButtonElement>("add-vpn").disabled = !labReachable || pending;
   $("add-vpn").hidden = files.length === 0; // with no files, the main button already does this
 
   drawTarget(lab, labReachable);
@@ -159,6 +182,8 @@ function setNetworkNote(n: Note | null) {
 }
 
 // ---- Target field: the box shows what the lab has, and a line under it says what happened ----
+/** From pressing Set target until the lab reports that address, so old results never describe a new target. */
+let settlingTarget: { ip: string; since: number } | null = null;
 let targetDirty = false; // the student has typed since the lab last agreed with the box
 let targetNote: { kind: "ok" | "error" | "info"; text: string } | null = null; // result of their last action
 
@@ -179,16 +204,28 @@ function drawTarget(lab: LabStatus["lab"] | undefined, labReachable: boolean) {
   // Follow the lab unless they're mid-edit, so the address never vanishes after Set.
   if (!targetDirty && document.activeElement !== input) input.value = shown;
 
+  // Has the lab caught up with what was just set? Until then, nothing it says is about this address.
+  if (settlingTarget) {
+    const { ip } = settlingTarget;
+    const listed = (k: string) => str(k).split(/\s+/).filter(Boolean).includes(ip);
+    const caughtUp = ip === "" ? !current && !blocked : listed("targets") || listed("blocked_targets");
+    if (caughtUp || Date.now() - settlingTarget.since > BUSY_MAX_MS) settlingTarget = null;
+  }
+  const settling = !!settlingTarget;
+
   const typed = input.value.trim();
-  button.textContent = typed === "" && shown ? "Clear target" : "Set target";
-  button.disabled = !labReachable || (typed === shown && !(typed === "" && shown));
+  button.textContent = settling ? (settlingTarget!.ip ? "Setting…" : "Clearing…") : typed === "" && shown ? "Clear target" : "Set target";
+  button.disabled = !labReachable || settling || (typed === shown && !(typed === "" && shown));
+  button.classList.toggle("spinning", settling);
+  button.toggleAttribute("aria-busy", settling);
 
   // What to say: a fresh error or confirmation first, then what the lab reports about the saved target.
   let line: { kind: string; text: string } | null = targetNote;
+  if (!line && settling) line = { kind: "info", text: settlingTarget!.ip ? `Setting ${settlingTarget!.ip}…` : "Clearing target…" };
   if (!line && !targetDirty) {
     if (blocked) line = { kind: "error", text: `${blocked} isn't a lab address, so it stays blocked.` };
-    else if (current && str("lost_targets")) line = { kind: "error", text: `${current} isn't answering. Is the machine running on HTB?` };
-    else if (current && str("live_targets")) line = { kind: "ok", text: `${current} is answering.` };
+    else if (current && str("lost_targets").split(/\s+/).includes(current)) line = { kind: "error", text: `${current} isn't answering. Is the machine running on HTB?` };
+    else if (current && str("live_targets").split(/\s+/).includes(current)) line = { kind: "ok", text: `${current} is answering.` };
     else if (current && str("state") === "connected") line = { kind: "info", text: `Target saved. Checking that ${current} answers…` };
     else if (current) line = { kind: "info", text: "Target saved. Connect to the lab to reach it." };
   }
@@ -212,6 +249,7 @@ function draw() {
   drawControls();
   terminal?.setGate(status.lab ? "ready" : "no-lab");
   tools?.redraw();
+  modes?.redraw();
 }
 
 function showError(msg: string) {
@@ -290,6 +328,7 @@ async function start() {
 
   terminal = setupTerminal(() => $("tab-terminal").click());
   tools = setupTools(() => status?.lab?.["state"] === "connected");
+  modes = setupModes(() => status, poll);
   setupTabs();
 
   // Adding a VPN file: the picker reads it here; the backend checks and saves it in the lab.
@@ -317,18 +356,22 @@ async function start() {
     e.preventDefault();
     if (files.length === 0) return void picker.click(); // no files yet: the button adds one
     const select = $<HTMLSelectElement>("network");
-    const verb = $("primary").textContent;
+    const action = $("primary").dataset.action;
+    if (action === "wait") return;
+    const disconnect = action === "disconnect";
     const name = labelFor(select.value);
-    setNetworkNote({ kind: "info", text: verb === "Disconnect" ? "Disconnecting…" : verb === "Switch network" ? `Switching to ${name}…` : `Connecting to ${name}…` });
+    busy = { kind: disconnect ? "disconnect" : action === "switch" ? "switch" : "connect", file: select.value, since: Date.now() };
+    setNetworkNote({ kind: "info", text: disconnect ? "Disconnecting…" : action === "switch" ? `Switching to ${name}…` : `Connecting to ${name}…` });
     run(async () => {
       try {
-        await invoke(verb === "Disconnect" ? "disconnect" : "connect", { file: select.value });
+        await invoke(disconnect ? "disconnect" : "connect", { file: select.value });
       } catch (err) {
+        busy = null; // nothing is happening, so stop the wheel
         setNetworkNote({ kind: "error", text: String(err) }); // right under the button, not at the bottom
         return;
       }
       // Connecting: the lab's own status takes over. Disconnecting: say what it means.
-      setNetworkNote(verb === "Disconnect" ? { kind: "ok", text: "Disconnected. Everything stays blocked until you connect again." } : null);
+      setNetworkNote(disconnect ? { kind: "ok", text: "Disconnected. Everything stays blocked until you connect again." } : null);
     });
   });
   $("network").addEventListener("change", () => setNetworkNote(null));
@@ -338,11 +381,13 @@ async function start() {
     const input = $<HTMLInputElement>("target");
     const ip = input.value.trim();
     targetNote = null;
-    setTargetNote("info", ip ? "Setting target…" : "Clearing target…");
+    settlingTarget = { ip, since: Date.now() };
+    setTargetNote("info", ip ? `Setting ${ip}…` : "Clearing target…");
     run(async () => {
       try {
         await invoke("set_target", { ip });
       } catch (err) {
+        settlingTarget = null; // nothing was set, so stop the wheel
         setTargetNote("error", String(err)); // stays next to the box, and the typed address stays in it
         return;
       }

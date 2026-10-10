@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # The student's terminal. Records every command (/lab/logs/commands.jsonl) and the full
-# transcript (/lab/logs/session-<time>.log) in the workspace, so the tutor can read them.
+# transcript (/lab/logs/session-<time>-<pid>.log) in the workspace, so the tutor can read them.
 set -euo pipefail
 LOGS=/lab/logs
 mkdir -p "$LOGS"
-LAB_SESSION=$(date -u +%Y%m%d-%H%M%S)
+# The pid keeps terminals opened in the same second from sharing (and overwriting) one transcript.
+LAB_SESSION="$(date -u +%Y%m%d-%H%M%S)-$$"
 export LAB_SESSION
 exec script -q -f --log-out "$LOGS/session-$LAB_SESSION.log" \
   -c "bash --rcfile /usr/local/share/lab/bashrc -i"

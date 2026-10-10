@@ -41,7 +41,11 @@ const scenarios: Record<string, { status: unknown; files?: unknown[] }> = {
   "docker-off": { files: [], status: { level: "off", title: "Docker isn't running", message: "Start Docker Desktop to use the lab.", lab: null } },
 };
 
+// A lab container that exists but is switched off (what stop_lab leaves behind).
+scenarios.stopped = { status: { level: "off", title: "Lab stopped", message: "The lab is switched off.", lab: null } };
+
 const pick = scenarios[new URLSearchParams(location.search).get("s") ?? "connected"] ?? scenarios.connected;
+let current = pick.status; // Mode switching: starting/stopping the lab moves the status
 
 // Fake shells for the terminal: echo typed text and answer a few commands. Several can run at once.
 const callbacks = new Map<number, (m: unknown) => void>();
@@ -75,7 +79,9 @@ const toolState = { installed: toolMode !== "missing", running: toolMode === "ru
   transformCallback: (cb: (m: unknown) => void) => { const id = nextCb++; callbacks.set(id, cb); return id; },
   unregisterCallback: (id: number) => callbacks.delete(id),
   invoke: async (cmd: string, args: Record<string, string>) => {
-    if (cmd === "lab_status") return pick.status;
+    if (cmd === "lab_status") return current;
+    if (cmd === "stop_lab") { await new Promise((r) => setTimeout(r, 600)); current = scenarios.stopped.status; return null; }
+    if (cmd === "start_lab") { await new Promise((r) => setTimeout(r, 600)); current = scenarios.connected.status; return null; }
     if (cmd === "vpn_files") return pick.files ?? files;
     if (cmd === "term_open") { const id = nextShell++; startShell(id, args.onEvent as unknown as { id: number }); return id; }
     if (cmd === "term_attach") { startShell(Number(args.id), args.onEvent as unknown as { id: number }); return null; }

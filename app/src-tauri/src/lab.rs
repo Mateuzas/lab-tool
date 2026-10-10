@@ -12,6 +12,10 @@ use serde_json::Value;
 
 pub const CONTAINER: &str = "kali-lab";
 
+/// Status title of a lab container that exists but is switched off. The UI (src/modes.ts) shows
+/// its launch screen when it sees exactly this title; a test keeps the two in step.
+pub const TITLE_STOPPED: &str = "Lab stopped";
+
 /// How old the supervisor's status may be before we treat the lab as unresponsive.
 /// The supervisor writes every ~3 s (plus up to 2 s for its gateway ping).
 const STALE_AFTER_SECS: i64 = 20;
@@ -94,7 +98,7 @@ pub fn interpret(status: Value, now: i64) -> LabStatus {
         "offline" => ("problem", "Offline"),
         _ => ("problem", "Needs attention"),
     };
-    let message = if level == "ok" { connected_message(&field("targets"), &field("message")) } else { field("message") };
+    let message = if level == "ok" { connected_message(&field("targets"), &field("live_targets"), &field("message")) } else { field("message") };
     let mut s = LabStatus::new(level, title, &message);
     s.lab = Some(status);
     s
@@ -102,13 +106,15 @@ pub fn interpret(status: Value, now: i64) -> LabStatus {
 
 /// Under a "Connected to the lab" headline, say what the student can do, and teach the scope
 /// rule at the same time. Refused targets keep the supervisor's own explanation.
-fn connected_message(targets: &str, supervisor: &str) -> String {
+fn connected_message(targets: &str, live: &str, supervisor: &str) -> String {
     if supervisor.contains("stays blocked") {
         supervisor.trim_start_matches("Connected. ").to_string()
     } else if supervisor.contains("isn't answering") {
         supervisor.to_string()
     } else if targets.is_empty() {
         "Enter the IP of the machine you spawned on HTB to start.".to_string()
+    } else if live.is_empty() {
+        format!("Waiting for {targets} to answer. Check that the machine is running on HTB.")
     } else {
         format!("You can reach {targets}. Everything else is blocked, so a typo can't hit a real computer.")
     }
@@ -132,7 +138,7 @@ pub async fn status() -> LabStatus {
         Err(e) => return LabStatus::new("problem", "Can't reach the lab", &e.to_string()),
     };
     if !running {
-        return LabStatus::new("off", "Lab stopped", "The lab is switched off.");
+        return LabStatus::new("off", TITLE_STOPPED, "The lab is switched off.");
     }
 
     match exec(&docker, &["cat", "/lab/state/status.json"]).await {
@@ -216,6 +222,31 @@ pub async fn connect(file: &str) -> Result<(), String> {
 
 pub async fn disconnect() -> Result<(), String> {
     write_state("selected-vpn", "").await
+}
+
+/// Start the lab (container, then the supervisor reconnects the last VPN and target).
+pub async fn start_lab() -> Result<(), String> {
+    running_lab().await.map(|_| ())
+}
+
+/// Stop the lab container: its VPN, proxy and terminals go with it. Used when another mode
+/// launches, so two modes never share a container or a proxy.
+pub async fn stop_lab() -> Result<(), String> {
+    // The client's default 5 s timeout is shorter than a graceful stop can take.
+    let docker = connect_docker()
+        .ok_or("Start Docker Desktop to use the lab.")?
+        .with_timeout(std::time::Duration::from_secs(30));
+    stop_named(&docker, CONTAINER).await
+}
+
+async fn stop_named(docker: &Docker, name: &str) -> Result<(), String> {
+    let options = bollard::query_parameters::StopContainerOptionsBuilder::new().t(5).build();
+    match docker.stop_container(name, Some(options)).await {
+        Ok(()) => Ok(()),
+        // Already stopped (304) or never created (404): the lab is off either way.
+        Err(bollard::errors::Error::DockerResponseServerError { status_code: 304 | 404, .. }) => Ok(()),
+        Err(e) => Err(format!("Couldn't stop the lab: {e}")),
+    }
 }
 
 /// OpenVPN options that run programs on the computer. HTB's files never contain them; a file
@@ -309,6 +340,15 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn ui_launch_screen_matches_the_stopped_title() {
+        let modes_ts = include_str!("../../src/modes.ts");
+        assert!(
+            modes_ts.contains(&format!("const LAB_STOPPED = \"{TITLE_STOPPED}\";")),
+            "src/modes.ts LAB_STOPPED must equal lab::TITLE_STOPPED ({TITLE_STOPPED:?})"
+        );
+    }
+
     const GOOD: &str = "client\ndev tun\nproto udp\nremote edge-eu-starting-point-2-dhcp.hackthebox.eu 1337\n";
 
     #[test]
@@ -346,8 +386,12 @@ mod tests {
 
     #[test]
     fn connected_messages_teach_scope() {
-        let with_target = json!({ "state": "connected", "targets": "10.129.15.9", "message": "Connected. Target: 10.129.15.9", "updated": 1 });
+        let with_target = json!({ "state": "connected", "targets": "10.129.15.9", "live_targets": "10.129.15.9",
+            "message": "Connected. Target: 10.129.15.9", "updated": 1 });
         assert!(interpret(with_target, 1).message.starts_with("You can reach 10.129.15.9."));
+        let waiting = json!({ "state": "connected", "targets": "10.129.15.9", "live_targets": "",
+            "message": "Connected. Waiting for 10.129.15.9 to answer...", "updated": 1 });
+        assert!(interpret(waiting, 1).message.starts_with("Waiting for 10.129.15.9 to answer."));
         let refused = json!({ "state": "connected", "blocked_targets": "8.8.8.8",
             "message": "Connected. 8.8.8.8 is not a lab address, so it stays blocked.", "updated": 1 });
         assert_eq!(interpret(refused, 1).message, "8.8.8.8 is not a lab address, so it stays blocked.");
@@ -431,6 +475,30 @@ mod tests {
         let mode = exec(&docker, &["stat", "-c", "%a", "/lab/vpn/zz_test.ovpn"]).await.unwrap();
         exec(&docker, &["rm", "-f", "/lab/vpn/zz_test.ovpn"]).await.unwrap();
         assert_eq!(mode.trim(), "600");
+    }
+
+    /// Stops a throwaway container (never the real lab) and checks stopping is idempotent and
+    /// tolerant of missing containers.
+    #[tokio::test]
+    #[ignore]
+    async fn live_stop_named_stops_only_that_container() {
+        let docker = connect_docker().expect("docker");
+        let run = |args: &[&str]| std::process::Command::new("docker").args(args).output().unwrap();
+        run(&["rm", "-f", "lab-tool-test-stop"]);
+        let started = run(&["run", "-d", "--name", "lab-tool-test-stop", "--entrypoint", "sleep", "kali-lab:dev", "300"]);
+        assert!(started.status.success(), "couldn't start the test container");
+
+        let lab_before = docker.inspect_container(CONTAINER, None).await.ok().and_then(|i| i.state?.running);
+        let docker = docker.with_timeout(std::time::Duration::from_secs(30));
+        stop_named(&docker, "lab-tool-test-stop").await.unwrap();
+        let state = docker.inspect_container("lab-tool-test-stop", None).await.unwrap().state.unwrap();
+        assert_eq!(state.running, Some(false), "test container should be stopped");
+        stop_named(&docker, "lab-tool-test-stop").await.unwrap(); // already stopped: fine
+        stop_named(&docker, "lab-tool-no-such-container").await.unwrap(); // missing: fine
+        run(&["rm", "-f", "lab-tool-test-stop"]);
+
+        let lab_after = docker.inspect_container(CONTAINER, None).await.ok().and_then(|i| i.state?.running);
+        assert_eq!(lab_before, lab_after, "the real lab must be untouched");
     }
 
     /// Talks to the real Docker. Run with: cargo test -- --ignored

@@ -170,6 +170,8 @@ while true; do
   selected=$(cat "$STATE/selected-vpn" 2>/dev/null | tr -d '[:space:]')
 
   if [ "$selected" != "$current" ]; then
+    # A different lab network means different machines: the old target would be a stale address.
+    [ -n "$current" ] && { : > "$STATE/scope"; scope_sig=""; scope_ok=""; scope_bad=""; log "target cleared: network changed"; }
     stop_vpn; current=$selected; refused=""; restarts=0; ever_connected=""
     tgt_seen=(); tgt_fails=(); target_lost=""; target_live=""
     lab-kill-switch block >/dev/null 2>&1
@@ -216,8 +218,10 @@ while true; do
         set_state connected "Connected. Pick the machine you spawned to start."
       elif [ -n "$target_lost" ]; then
         set_state connected "Connected, but $target_lost isn't answering. Is the machine running on HTB?"
-      else
+      elif [ -n "$target_live" ]; then
         set_state connected "Connected. Target: $scope_ok"
+      else
+        set_state connected "Connected. Waiting for $scope_ok to answer..."
       fi
     elif vpn_alive; then
       err=$(classify_error)
