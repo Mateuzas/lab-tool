@@ -30,7 +30,12 @@ workspace/
 ```
 
 `<handle>` is the platform handle, lower case, `[a-z0-9-]`, prefixed with the platform:
-`intigriti-<api handle>`. Timestamps: UTC, `YYYYMMDDTHHMMSSZ` in names, ISO 8601 in JSON.
+`intigriti-<api handle>`. When API handles collide (several programs are called `vdp`) it is
+`intigriti-<company>-<api handle>`, company from `webLinks`. Once assigned, a handle stays fixed by
+`platform_id`. `&` → `-and-`, accents dropped.
+
+The data folder is `$BOUNTY_WORKSPACE`, default `<repo>/workspace/bounty` (worktrees point it at the
+main clone's data). Timestamps: UTC, `YYYYMMDDTHHMMSSZ` in names, ISO 8601 in JSON.
 
 ## 2. Program profile: `program.json`
 
@@ -47,7 +52,7 @@ Built from the API (docs/research/intigriti-api.md). `raw/` keeps the responses 
   "status": "open",                          // open | suspended | closed  (status.value, lower case)
   "confidentiality": "public",               // public | registered | application
   "industry": "Software",
-  "detail": "ok",                            // ok | needs-join (detail returned 403) | error
+  "detail": "ok",                            // ok | needs-join (detail 403) | error | not-fetched (program not open; scope/rules from an earlier sync are kept)
   "synced_at": "2026-11-13T12:00:00Z",
   "first_seen_at": "2025-01-10T08:00:00Z",   // earliest activity we have for it; null if none
   "bounty": {"min": 50, "max": 10000, "currency": "EUR", "min_eur": 50, "max_eur": 10000},
@@ -123,8 +128,9 @@ Reason codes: `no-profile`, `host-mismatch`, `out-of-scope`, `not-in-scope`, `in
 
 `host/bounty programs rank [--json] [--top N] [--explain <handle>] [--include-no-bounty] [--include-join]`
 
-Only `status: open` programs. Each gets four factors in `0..1`; `pr(x)` is the percentile rank of
-`x` among the programs being ranked; missing inputs are dropped and the remaining weights inside
+Only `status: open` programs. Each gets four factors in `0..1`; `pr(x)` is the mid-rank percentile
+of `x` among the ranked (not excluded) programs, ties share the average position, one program
+scores 0.5; missing inputs are dropped and the remaining weights inside
 the factor renormalised (never guessed).
 
 | Factor | Formula (v1) |
@@ -140,9 +146,11 @@ total = w.payout·payout + w.findability·findability + w.competition·(1 − co
 
 Hard filters (shown in a separate "excluded" list with the reason): `max_eur == 0` (`no-bounty`,
 unless `--include-no-bounty`), `safe_harbour == false` (`no-safe-harbour`), no enforceable web entry
-in scope (`no-web-scope`). Programs with `detail: needs-join` are ranked on list fields only
-(payout without `paid_share`, competition, no findability or friction), marked `join`, and listed
-after the others unless `--include-join` mixes them in.
+in scope (`no-web-scope`). Programs without detail (`needs-join`, `error`) are ranked on list fields: payout without
+`paid_share`, competition, and **assumed** findability 0.5 and friction 0.15 (shown in `--explain`).
+They are marked `join` and listed after the others unless `--include-join` mixes them in.
+A "web entry" is `wildcard`, `domain` or `url`. In `--json`, excluded programs have `total` and
+factors `null`.
 
 `--json`: `[{"handle","total","factors":{"payout","findability","competition","friction"},"inputs":{…},"flags":["join"],"excluded":null|"<reason>"}]`, sorted by `total` desc.
 Text: one line per program: rank, total, the four factors, max bounty, surface, days since scope
@@ -182,8 +190,11 @@ looked up once per guard start via a `recon-source` and logged on every line.
 | `guard status` | active program, rate limit, last refusals | 0 |
 | `time start|stop [note]` | append to `time.jsonl` | 0 |
 
-Errors go to stderr as one line `bounty: <code>: <message>`, never containing a token.
-`history.jsonl` line: `{"ts","kind":"program-new|scope-added|scope-removed|bounty-changed|rules-changed","detail":{...}}`.
+Errors go to stderr as one line `bounty: <code>: <message>`, never containing a token. Usage errors
+(bad flags, unknown `--handle`) exit 64. A failed detail request is recorded in the sync index; the
+sync still exits 0.
+`history.jsonl` line: `{"ts","kind":"program-new|scope-added|scope-removed|bounty-changed|rules-changed","detail":{…,"from_sync","to_sync"}}`.
+Scope entries are compared by (type, value, tier), in and out, only when both snapshots have scope.
 
 Inside the container: `bounty-run --actor <human|claude> -- <cmd…>` runs a command as uid `hunter`
 with the proxy env and `X-Bounty-Actor` set (curl/httpx/katana/ffuf/nuclei get it through their
