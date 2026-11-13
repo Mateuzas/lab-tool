@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Bug bounty CLI (docs/CONTRACTS.md §6). Python package: bounty/ (stdlib only).
+# Run with the Intigriti token: scripts/secrets.sh exec intigriti -- host/bounty programs sync
+# BOUNTY_WORKSPACE overrides the data folder (default: <repo>/workspace/bounty).
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# -I (isolated): no PYTHONPATH, no user site, no CWD on sys.path; the repo root is added explicitly.
+exec python3 -I -c 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = "host/bounty"; runpy.run_module("bounty.cli", run_name="__main__", alter_sys=True)' "$root" "$@"
