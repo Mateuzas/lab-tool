@@ -1,4 +1,4 @@
 # Intigriti Researcher API (ADR 009). Create the token at Intigriti: account settings, API tokens.
 # Replace the placeholders, save and quit: the file is re-encrypted on save.
-INTIGRITI_TOKEN: replace-with-your-personal-access-token
-INTIGRITI_USERNAME: replace-with-your-intigriti-username
+INTIGRITI_TOKEN: "<paste your personal access token>"
+INTIGRITI_USERNAME: "<your intigriti username>"
