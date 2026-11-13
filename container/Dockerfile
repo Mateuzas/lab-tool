@@ -16,6 +16,10 @@ RUN apt-get update \
       openssh-client netcat-openbsd telnet ftp smbclient redis-tools default-mysql-client \
  && rm -rf /var/lib/apt/lists/*
 
+# A lab machine that is switched off sends nothing, so an ssh session to it would freeze. With
+# these settings ssh gives up and returns to the prompt after about 15 s of silence.
+RUN printf 'Host *\n    ServerAliveInterval 5\n    ServerAliveCountMax 3\n' > /etc/ssh/ssh_config.d/00-lab.conf
+
 COPY --chmod=0755 bin/ /usr/local/bin/
 COPY share/ /usr/local/share/
 

@@ -27,6 +27,7 @@ test: lint ## lint + all tests that need no target machine (lab must be connecte
 	tests/supervisor-test.sh $(VPN)
 	tests/scope-test.sh
 	tests/shell-log-test.sh
+	tests/session-drop-test.sh
 
 test-target: ## kill switch + proxy tests against a spawned machine: make test-target TARGET=10.129.x.x
 	@test -n "$(TARGET)" || { echo "usage: make test-target TARGET=<ip of a machine you spawned>"; exit 1; }
