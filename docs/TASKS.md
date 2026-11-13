@@ -29,11 +29,11 @@ next slice (ADR 003).
 
 | Id | Owner | Task | Depends | Status | Done when |
 |---|---|---|---|---|---|
-| BE-2 | Backender | `host/bounty programs sync` + normaliser to `program.json` (CONTRACTS §2, §6), activities, sync index, exit codes | BE-1, ARC-2 | in progress | unit tests on recorded raw responses (fixtures scrubbed of tokens); a real sync of all visible programs |
-| BE-3 | Backender | `programs rank` with factor scores, hard filters, `--explain`, `--json`, default `config/ranking.json` (CONTRACTS §4) | BE-2 | in progress | unit tests per factor and for missing inputs; top 20 printed for review |
-| BE-4 | Backender | `programs changes` + `history.jsonl` (new programs, scope added/removed, bounty and rules changed) | BE-2 | in progress | tests with two synthetic syncs |
+| BE-2 | Backender | `host/bounty programs sync` + normaliser to `program.json` (CONTRACTS §2, §6), activities, sync index, exit codes | BE-1, ARC-2 | done (#6) | unit tests on recorded raw responses (fixtures scrubbed of tokens); a real sync of all visible programs |
+| BE-3 | Backender | `programs rank` with factor scores, hard filters, `--explain`, `--json`, default `config/ranking.json` (CONTRACTS §4) | BE-2 | done (#6) | unit tests per factor and for missing inputs; top 20 printed for review |
+| BE-4 | Backender | `programs changes` + `history.jsonl` (new programs, scope added/removed, bounty and rules changed) | BE-2 | done (#6) | tests with two synthetic syncs |
 | ARC-2 | Architect | Finalise CONTRACTS §2/§4 from the BE-1 report | BE-1 | done | – |
-| ARC-3 | Architect + user | Review the ranking together, adjust weights, **pick the first program**, read its full rules | BE-3 | todo | `program use` target chosen; rules read by the user |
+| ARC-3 | Architect + user | Review the ranking together, adjust weights, **pick the first program**, read its full rules | BE-3 | in progress | `program use` target chosen; rules read by the user |
 
 ## Slice 2: scope guard (before any request to a target)
 
