@@ -5,4 +5,5 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # -I (isolated): no PYTHONPATH, no user site, no CWD on sys.path; the repo root is added explicitly.
-exec python3 -I -c 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = "host/bounty"; runpy.run_module("bounty.cli", run_name="__main__", alter_sys=True)' "$root" "$@"
+# -B: no __pycache__ in the repo (.gitignore does not cover it).
+exec python3 -I -B -c 'import runpy, sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = "host/bounty"; runpy.run_module("bounty.cli", run_name="__main__", alter_sys=True)' "$root" "$@"
