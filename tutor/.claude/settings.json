@@ -36,5 +36,18 @@
     ],
     "defaultMode": "dontAsk"
   },
-  "enableAllProjectMcpServers": true
+  "enableAllProjectMcpServers": true,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/../host/lab\" snapshot",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
 }
