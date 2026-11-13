@@ -1,0 +1,17 @@
+# gitleaks config for scripts/check-secrets.sh: the default rules plus what they don't cover.
+title = "kali-lab"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "openvpn-inline-key"
+description = "OpenVPN config with an inline private key or TLS key (HTB/THM .ovpn files)"
+regex = '''<(key|tls-auth|tls-crypt)>\s*-----BEGIN'''
+keywords = ["<key>", "<tls-auth>", "<tls-crypt>"]
+
+[[rules]]
+id = "intigriti-token-assignment"
+description = "Intigriti personal access token written in plaintext"
+regex = '''INTIGRITI_TOKEN\s*[:=]\s*['"]?[A-Za-z0-9._-]{20,}'''
+keywords = ["intigriti_token"]
