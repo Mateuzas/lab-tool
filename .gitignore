@@ -11,3 +11,7 @@ workspace/
 keys.txt
 *.dec.*
 *.enc.*.tmp
+
+# Python bytecode (host/bounty runs with -B, this is a backstop)
+__pycache__/
+*.pyc

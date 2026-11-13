@@ -137,11 +137,15 @@ class TestFilters(unittest.TestCase):
         self.assertEqual(order[-1], "join-rich")
         j = by_handle(res)["join-rich"]
         self.assertEqual(j["flags"], ["join"])
-        self.assertIsNone(j["factors"]["findability"])
-        self.assertIsNone(j["factors"]["friction"])
+        # hidden scope: findability and friction are assumed average, not dropped
+        self.assertAlmostEqual(j["factors"]["findability"], R.ASSUMED_FINDABILITY)
+        self.assertAlmostEqual(j["factors"]["friction"], R.ASSUMED_FRICTION)
+        self.assertEqual(j["parts"]["assumed"], ["findability", "friction"])
         self.assertAlmostEqual(j["factors"]["payout"], 1.0)  # no paid_share multiplier
-        mixed = [r["handle"] for r in R.score(progs, W, NOW, include_join=True)]
-        self.assertEqual(mixed[0], "join-rich")
+        mixed = by_handle(R.score(progs, W, NOW, include_join=True))
+        # a join program can still lead on payout, but no longer gets the full positive weight
+        # from payout alone: its total is below payout·(w.payout+w.findability+w.competition)
+        self.assertLess(mixed["join-rich"]["total"], 0.9 * (W["payout"] + W["findability"] + W["competition"]))
         # join programs are never dropped for safe harbour / web scope (unknown)
         self.assertIsNone(j["excluded"])
         jb = by_handle(R.score([prog("j0", max_eur=0, min_eur=0, detail="needs-join")], W, NOW))
@@ -163,7 +167,7 @@ class TestOutput(unittest.TestCase):
         self.assertIn("join", text)
         self.assertIn("excluded no-bounty (1):", text)
         exp = R.render_explain(res, "intigriti-b", W)
-        self.assertIn("list fields only", exp)
+        self.assertIn("scope hidden until you join", exp)
 
     def test_default_config_written(self):
         ws = tempfile.mkdtemp()
