@@ -1,0 +1,9 @@
+# SOPS config for kali-lab. See docs/SECRETS.md and ADR 006.
+# Recipients are age *public* keys; private keys never enter the repo.
+#   secrets/            project secrets, committed (encrypted)
+#   workspace/secrets/  the user's own secrets (API tokens), gitignored with the rest of workspace/
+# To add a person or CI, append their public key (comma-separated) and run scripts/secrets.sh rekey.
+creation_rules:
+  - path_regex: (^|/)(workspace/)?secrets/[^/]+\.enc\.(yaml|json|env)$
+    age: >-
+      age1u6zskx4nwss7wkju0sssl3t4u6mxvp6ajjdc4phhwqj35vscly6s7rgq8c

@@ -1,2 +1,13 @@
 # User data: VPN files (credentials), status, captures. Never commit.
 workspace/
+
+# Secrets: only SOPS-encrypted files are allowed (docs/SECRETS.md, ADR 006).
+# workspace/secrets/ is already covered by workspace/ above.
+.env
+.env.*
+*.ovpn
+*.agekey
+*.key
+keys.txt
+*.dec.*
+*.enc.*.tmp
