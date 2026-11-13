@@ -33,8 +33,8 @@ the protocol's `backend/ frontend/ infra/` folders map onto existing directories
 - **Secrets only through SOPS** (ADR 006): no plaintext tokens, `.ovpn` contents or API keys in git,
   logs, PR text, chat or test fixtures. Read them with `sops exec-env`, never write them to disk.
 - The container is never `--privileged`; published ports bind to `127.0.0.1` only.
-- `make lint` fails in place on this Mac (Docker Desktop file sharing on the iCloud-synced Desktop
-  gives `resource busy`). Until OPS fixes it, run ShellCheck on a copy outside the Desktop and say so.
+- The clone lives at `~/Developer/kali-lab`. Never put it (or a worktree) in an iCloud-synced folder
+  such as `~/Desktop`: git, Docker file sharing and gitleaks fail there (`mmap failed`, `resource busy`).
 
 ## Repo map
 
