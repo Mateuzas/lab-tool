@@ -1,7 +1,7 @@
 # Contracts
 
 Only the Architect edits this file. If code and contract disagree, report it; don't "fix" either side
-alone. Sections marked **draft** are expected to change once the Intigriti API has been explored (BE-1).
+alone. §2–§4 are based on the real API (docs/research/intigriti-api.md); §7 is still a draft.
 
 ## 1. Workspace layout (Bug bounty)
 
@@ -16,6 +16,7 @@ workspace/
     active                         one line: the handle of the active program, or empty
     sync/
       <UTC timestamp>.json         index of one sync: handles, counts, errors
+    activities.jsonl             every program activity seen (deduplicated), for first_seen_at and changes
     programs/<handle>/
       raw/<UTC timestamp>/*.json   API responses exactly as received
       program.json                 normalised profile (§2)
@@ -29,56 +30,57 @@ workspace/
 ```
 
 `<handle>` is the platform handle, lower case, `[a-z0-9-]`, prefixed with the platform:
-`intigriti-<company>-<program>`. Timestamps: UTC, `YYYYMMDDTHHMMSSZ` in names, ISO 8601 in JSON.
+`intigriti-<api handle>`. Timestamps: UTC, `YYYYMMDDTHHMMSSZ` in names, ISO 8601 in JSON.
 
-## 2. Program profile: `program.json` (draft until BE-1)
+## 2. Program profile: `program.json`
+
+Built from the API (docs/research/intigriti-api.md). `raw/` keeps the responses it came from.
 
 ```json
 {
   "schema": 1,
-  "handle": "intigriti-acme-acme",
+  "handle": "intigriti-acme",                 // "intigriti-" + API handle, lower case
   "platform": "intigriti",
-  "platform_id": "<id from the API>",
+  "platform_id": "0083a5bf-…",
   "name": "Acme",
-  "url": "https://app.intigriti.com/programs/acme/acme/detail",
-  "status": "open",                       // open | suspended | closed
-  "confidentiality": "public",            // public | registered | application | private
-  "type": "bounty",                       // bounty | vdp
-  "industry": "Retail",
-  "launched_at": "2025-03-01T00:00:00Z",  // null if unknown
+  "url": "https://app.intigriti.com/…/detail",  // webLinks.detail
+  "status": "open",                          // open | suspended | closed  (status.value, lower case)
+  "confidentiality": "public",               // public | registered | application
+  "industry": "Software",
+  "detail": "ok",                            // ok | needs-join (detail returned 403) | error
   "synced_at": "2026-11-13T12:00:00Z",
-  "currency": "EUR",
-  "bounty": {
-    "min": 50, "max": 10000,
-    "by_severity": {"low": 100, "medium": 500, "high": 2000, "critical": 10000}  // null values allowed
-  },
-  "scope": {
-    "in":  [{"type": "wildcard", "value": "*.acme.com", "tier": 1, "description": ""}],
+  "first_seen_at": "2025-01-10T08:00:00Z",   // earliest activity we have for it; null if none
+  "bounty": {"min": 50, "max": 10000, "currency": "EUR", "min_eur": 50, "max_eur": 10000},
+  "scope": {                                 // null when detail != ok
+    "version": "<domains.id>",
+    "changed_at": "2026-10-01T09:00:00Z",    // domains.createdAt
+    "in":  [{"type": "wildcard", "value": "*.acme.com", "tier": "tier-1", "description": ""}],
     "out": [{"type": "url", "value": "https://status.acme.com", "description": ""}]
   },
-  "rules": {
-    "rate_limit_rps": 5,                  // null = not stated; the guard then uses 5
-    "request_header": {"name": "X-Intigriti-Username", "value": "<filled from secrets at runtime>"},
-    "automation": "allowed",              // allowed | limited | forbidden | unknown
-    "ai_use": "allowed-disclosed",        // allowed-disclosed | forbidden | unknown
-    "test_accounts": "self-register",     // self-register | provided | none | unknown
-    "text": "<rules of engagement, as written>"
+  "rules": {                                 // null when detail != ok
+    "version": "<rulesOfEngagement.id>",
+    "changed_at": "2026-10-01T09:00:00Z",
+    "safe_harbour": true,
+    "rate_limit_rps": 5,                     // automatedTooling; null = not stated
+    "automation": "allowed",                 // allowed (rps > 0) | forbidden (rps == 0) | unknown (null)
+    "intigriti_me": true,                    // test accounts must use your @intigriti.me address
+    "user_agent": null,                      // required User-Agent template, or null
+    "request_header": "X-Intigriti-Username: {Username}",   // template, or null
+    "ai_use": "allowed-disclosed",           // platform Code of Conduct default; "forbidden" if the rules text says so (manual tag)
+    "text": "<rules of engagement markdown>"
   },
-  "legal_basis": "program",               // program | lt-article-25   (ADR 008)
-  "stats": {                              // whatever the API exposes; null when absent
-    "submissions": null, "accepted": null, "researchers": null,
-    "avg_first_response_days": null, "avg_bounty_days": null
-  },
-  "signals": {                            // computed by `programs rank`, never hand-edited
-    "scope_wildcards": 1, "scope_assets": 1, "last_scope_change_at": null
-  }
+  "legal_basis": "program"                   // program | lt-article-25 (ADR 008)
 }
 ```
 
-Scope entry `type`: `wildcard` (`*.example.com`, matches subdomains at any depth, **not** the apex),
-`domain` (exact host), `url` (scheme + host + path prefix), `ip`, `cidr`, `mobile`, `other`.
-Only `wildcard`, `domain`, `url`, `ip` and `cidr` are enforceable by the guard; the rest are shown
-but never matched.
+Mapping: API `type` → `wildcard` (Wildcard), `url` (Url; a bare host becomes `domain`), `cidr`
+(IpRange), `android`, `ios`, `source`, `device`, `other`. API `tier` → `tier-1`…`tier-5`,
+`no-bounty`; entries whose tier is **Out Of Scope go to `scope.out`**, everything else to `scope.in`.
+Currency → EUR with fixed rates from `config/ranking.json` (`fx`), not live rates.
+
+Enforceable by the guard: `wildcard` (`*.example.com` matches subdomains at any depth, **not** the
+apex), `domain` (exact host), `url` (scheme + host + path prefix), `cidr`. The rest are shown only.
+`{Username}` in templates is replaced with `INTIGRITI_USERNAME` at `program use` time.
 
 ## 3. Scope guard
 
@@ -93,7 +95,9 @@ header. **All three must agree** (case-insensitive, trailing dot removed), other
 4. no `scope.in` entry matches → `not-in-scope`
 5. a resolved IP is private, loopback, link-local, CGNAT or metadata (169.254.169.254) and the
    profile doesn't list it as `ip`/`cidr` → `internal-address`
-6. rate limit bucket empty → wait up to 10 s, then `rate-limited`
+6. rate limit bucket empty → wait up to 10 s, then `rate-limited`. Rate = `rules.rate_limit_rps`;
+   null → 2 req/s; 0 → only `--actor human` traffic (Burp, your terminal), tools and Claude refused
+   with `automation-forbidden`
 7. otherwise allow, add the required header, forward.
 
 `url` entries also check the path prefix (after the request line is known).
@@ -115,33 +119,40 @@ Reason codes: `no-profile`, `host-mismatch`, `out-of-scope`, `not-in-scope`, `in
 ### 3.4 `recon-sources.json`
 `{"hosts": ["crt.sh", "web.archive.org", ...], "rate_limit_rps": 2}`. Exact hosts only, no wildcards.
 
-## 4. Ranking (draft until BE-1; ADR 007)
+## 4. Ranking (ADR 007)
 
-`host/bounty programs rank [--json] [--top N] [--explain <handle>]`
+`host/bounty programs rank [--json] [--top N] [--explain <handle>] [--include-no-bounty] [--include-join]`
 
-Each program gets factor scores in `0..1` and one total:
+Only `status: open` programs. Each gets four factors in `0..1`; `pr(x)` is the percentile rank of
+`x` among the programs being ranked; missing inputs are dropped and the remaining weights inside
+the factor renormalised (never guessed).
 
-```
-total = w_pay·payout + w_find·findability + w_comp·(1 − competition) − w_fric·friction
-```
-
-| Factor | Inputs (use what exists; missing inputs are skipped and renormalised, never guessed) |
+| Factor | Formula (v1) |
 |---|---|
-| `payout` | medium and high bounty amounts (weighted more than `max`, which is rarely paid), log-scaled across all programs |
-| `findability` | number of wildcards and assets, asset types (web/API > static), self-register test accounts, recent scope additions, `type` = bounty |
-| `competition` | program age, confidentiality (private < application < registered < public), submission/researcher counts if exposed, brand size bucket (manual tag in config) |
-| `friction` | automation forbidden, slow first response / bounty, strict rules, KYC-limited |
+| `payout` | `pr(0.6·ln(1+max_eur) + 0.4·ln(1+min_eur)) · (0.5 + 0.5·paid_share)`; `paid_share` = in-scope entries in tiers 1–5 ÷ all in-scope entries |
+| `findability` | `0.7·pr(ln(1+surface)) + 0.3·freshness`; `surface` = 5·wildcards + 2·cidr + 1·(url+domain) + 0.5·(android+ios+source); `freshness` = `exp(−days_since(scope.changed_at)/90)` |
+| `competition` | `0.5·conf + 0.25·age + 0.25·pr(max_eur)`; `conf` public 1.0, registered 0.7, application 0.4; `age` = `min(1, days_since(first_seen_at)/730)` |
+| `friction` | sum, capped at 1: automation forbidden 0.6, rps ≤ 2 0.3, rps unknown 0.15, `intigriti_me` 0.05, `user_agent` 0.05 |
 
-Hard filters (excluded, listed separately with the reason): `status` ≠ `open`, `type` = `vdp` unless
-`--include-vdp`, no enforceable in-scope entry, `ai_use` = `forbidden` when `--copilot` is set.
+```
+total = w.payout·payout + w.findability·findability + w.competition·(1 − competition) − w.friction·friction
+```
 
-`--json` output: `[{"handle","total","factors":{"payout","findability","competition","friction"},"inputs":{...},"excluded":null|"<reason>"}]`
-sorted by `total` descending. Text output: one line per program, factor columns visible.
+Hard filters (shown in a separate "excluded" list with the reason): `max_eur == 0` (`no-bounty`,
+unless `--include-no-bounty`), `safe_harbour == false` (`no-safe-harbour`), no enforceable web entry
+in scope (`no-web-scope`). Programs with `detail: needs-join` are ranked on list fields only
+(payout without `paid_share`, competition, no findability or friction), marked `join`, and listed
+after the others unless `--include-join` mixes them in.
 
-`config/ranking.json`: `{"weights":{"payout":0.35,"findability":0.30,"competition":0.25,"friction":0.10},"brand_size":{"<handle>":"large"}}`.
+`--json`: `[{"handle","total","factors":{"payout","findability","competition","friction"},"inputs":{…},"flags":["join"],"excluded":null|"<reason>"}]`, sorted by `total` desc.
+Text: one line per program: rank, total, the four factors, max bounty, surface, days since scope
+change, confidentiality, flags.
 
-Feedback loop (later, BE-8): `time.jsonl` and findings give hours and outcomes per program; a report
-compares rank with your own results so the weights can be tuned on evidence.
+`config/ranking.json` (written with defaults on first run):
+`{"weights":{"payout":0.35,"findability":0.30,"competition":0.25,"friction":0.10},"fx":{"EUR":1,"USD":0.92,"GBP":1.17}}`
+
+Feedback (BE-10): `/v1/payouts` and `time.jsonl` give earnings and hours per program, to compare with
+the rank and tune the weights on evidence.
 
 ## 5. Flow log: `flows/<date>.jsonl`
 
@@ -162,7 +173,7 @@ looked up once per guard start via a `recon-source` and logged on every line.
 
 | Command | Does | Exit codes |
 |---|---|---|
-| `programs sync [--handle H]` | fetch from Intigriti, write raw + `program.json` | 0 ok, 2 auth, 3 API/network, 4 parse |
+| `programs sync [--handle H]` | list + detail for every open program (≤ 1 req/s) + new activities, write raw + `program.json`; 403 on detail = `needs-join`, not an error | 0 ok, 2 auth, 3 API/network, 4 parse |
 | `programs list [--filter …]` | table of synced programs | 0 |
 | `programs rank [...]` | §4 | 0 |
 | `programs changes [--since TS]` | diff of the last two syncs, appended to each `history.jsonl` | 0, 1 if nothing changed |
