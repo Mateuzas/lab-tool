@@ -10,6 +10,8 @@ SURFACE_WEIGHT = {"wildcard": 5.0, "cidr": 2.0, "url": 1.0, "domain": 1.0,
                   "android": 0.5, "ios": 0.5, "source": 0.5}
 WEB_TYPES = ("wildcard", "domain", "url")
 FACTORS = ("payout", "findability", "competition", "friction")
+ASSUMED_FINDABILITY = 0.5   # an average program, when its scope is hidden (needs-join)
+ASSUMED_FRICTION = 0.15     # same as "rate limit unknown"
 
 
 def percentile_ranker(values):
@@ -159,6 +161,16 @@ def score(programs, weights, now, include_no_bounty=False, include_join=False):
         parts["pr_max_eur"] = pr_max(inp["max_eur"])
         competition = wavg([(0.5, parts["conf"]), (0.25, parts["age"]), (0.25, parts["pr_max_eur"])])
         fric = friction(inp)
+        # Without the detail (needs-join, error) a whole factor is unknown. Assume an average
+        # program rather than dropping the factor: dropping it let list-only programs outrank
+        # programs we actually know (CONTRACTS §4).
+        assumed = []
+        if inp["detail"] != "ok":
+            if findability is None:
+                findability, assumed = ASSUMED_FINDABILITY, assumed + ["findability"]
+            if fric is None:
+                fric, assumed = ASSUMED_FRICTION, assumed + ["friction"]
+        parts["assumed"] = assumed
         pos = [(w["payout"], payout), (w["findability"], findability),
                (w["competition"], None if competition is None else 1.0 - competition)]
         avg = wavg(pos)
@@ -295,7 +307,6 @@ def render_explain(results, handle, weights):
         L.append("weights: " + ", ".join("%s %.2f" % (k, weights[k]) for k in FACTORS))
         L.append("total = w.payout·payout + w.findability·findability + w.competition·(1−competition)"
                  " − w.friction·friction")
-        if f["findability"] is None or f["friction"] is None:
-            L.append("  (list fields only: the positive part is renormalised over the factors that"
-                     " exist, friction counts 0)")
+        if r.get("parts", {}).get("assumed"):
+            L.append("  (scope hidden until you join: assumed %s = average)" % " and ".join(r["parts"]["assumed"]))
     return "\n".join(L)
