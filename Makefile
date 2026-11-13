@@ -1,9 +1,9 @@
 # Entry points for humans and CI. Run `make help`.
 SHELL := /bin/bash
-SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh)
+SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh) $(wildcard scripts/*.sh)
 VPN ?= starting
 
-.PHONY: help build up down status lint test test-target clean app-dev app-test app-build app-shots
+.PHONY: help build up down status lint secrets-check test test-target clean app-dev app-test app-build app-shots
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -22,6 +22,9 @@ status: ## show lab status
 
 lint: ## shellcheck every script (no local install needed)
 	docker run --rm -v "$(CURDIR)":/mnt:ro -w /mnt koalaman/shellcheck:stable -S warning $(SCRIPTS)
+
+secrets-check: ## fail if anything secret would be committed (SOPS files, plaintext, gitleaks)
+	scripts/check-secrets.sh
 
 test: lint ## lint + all tests that need no target machine (lab must be connected)
 	tests/supervisor-test.sh $(VPN)
