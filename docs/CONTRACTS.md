@@ -290,3 +290,33 @@ CLI additions behind this (BE-12):
 - `programs status --json` → `Ranking.status`.
 - `programs rank --json` items gain `name` and `url`.
 - `programs changes --json` → `ChangeEvent[]` (exit codes unchanged: 1 = nothing changed, still valid JSON `[]`).
+
+### 9.1 Guard controls in the app (slice 2b)
+
+| Command | Runs | Returns |
+|---|---|---|
+| `bounty_guard_status()` | `host/bounty guard status --json` (exit 5 / container missing → `running: false`) | `GuardStatus` |
+| `bounty_use(handle)` | `host/bounty guard start` if `kali-bounty` isn't running (it stops `kali-lab`), then `scripts/secrets.sh exec intigriti -- host/bounty program use <handle>` | `GuardStatus` after the switch; `Err(message)` with the CLI's `bounty: <code>: <message>` text |
+| `bounty_guard_stop()` | `host/bounty guard stop` (never `--purge`) | `()` |
+| `bounty_open_burp()` | `host/bounty burp` | `()`; the CLI's warning line (Burp already open) comes back as `Ok` with a note → return `string | null` |
+| `start_lab()` (existing) | now first runs `host/bounty guard stop` if `kali-bounty` is running | unchanged |
+
+`handle` must match `^intigriti-[a-z0-9-]{1,100}$` before anything is spawned.
+
+```ts
+type GuardStatus = {
+  running: boolean;                     // kali-bounty container running
+  status: "active" | "no-profile" | "error" | "down" | "starting" | null;
+  program: string | null;               // active handle
+  rate_rps: number | null; automation: string | null;
+  egress_ip: string | null;
+  last_error: string | null;
+  last_refusals: { ts: string; url: string; reason: string }[];   // newest first, max 5
+};
+```
+
+UI (FE-4): `u` on the selected row = use that program (confirm only when switching away from a
+different active program); the header shows the guard: `Guard · Dropbox · 5 req/s · active`
+(or `Guard off`), polling `bounty_guard_status()` every 5 s while Bug bounty mode is visible; the
+active program's row is marked; `b` opens Burp through the guard; `g` stops the guard. Lab mode's
+start button keeps working and the bounty header then shows `Guard off`.
