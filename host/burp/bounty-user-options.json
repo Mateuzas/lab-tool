@@ -1,0 +1,27 @@
+{
+  "user_options": {
+    "connections": {
+      "socks_proxy": {
+        "use_proxy": false,
+        "host": "",
+        "port": 0,
+        "dns_over_socks": false,
+        "username": "",
+        "password": ""
+      },
+      "upstream_proxy": {
+        "servers": [
+          {
+            "enabled": true,
+            "destination_host": "*",
+            "proxy_host": "127.0.0.1",
+            "proxy_port": 8081,
+            "authentication_type": "none",
+            "username": "",
+            "password": ""
+          }
+        ]
+      }
+    }
+  }
+}

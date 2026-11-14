@@ -57,6 +57,7 @@ def build_parser():
     gsp.add_argument("--yes", action="store_true", help="confirm --purge")
     gst = gs.add_parser("status", help="active program, rate limit, last refusals")
     gst.add_argument("--json", action="store_true")
+    sub.add_parser("burp", help="launch Burp with the guard as upstream proxy (127.0.0.1:8081)")
     fl = sub.add_parser("flows", help="the guard's flow log (CONTRACTS §5), read from the container")
     fl.add_argument("action", nargs="?", choices=["export"], help="export <handle> <dir>: copy flows to a Mac folder")
     fl.add_argument("args", nargs="*", metavar="ARG")
@@ -203,6 +204,30 @@ def cmd_flows(args, ws):
     return guard_mod.flows(args.handle, args.tail, args.json)
 
 
+BURP_APP = "/Applications/Burp Suite.app"
+
+
+def cmd_burp(args, ws):
+    """Launch Burp with every request going through the scope guard (host/burp/bounty-*.json).
+
+    A Burp that is already open keeps its old settings: quit it first. Burp's startup screen
+    still needs Next / Start Burp; the settings from these files are preselected."""
+    import subprocess
+    if not os.path.isdir(BURP_APP):
+        raise BountyError("burp", "Burp Suite isn't installed in /Applications", 5)
+    running = subprocess.run(["pgrep", "-f", "Burp Suite.app"], stdout=subprocess.DEVNULL).returncode == 0
+    if running:
+        _err("burp: Burp is already open; quit it first if it isn't using the guard (Settings > Network > Upstream proxy)")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg = os.path.join(root, "host", "burp")
+    subprocess.run(["/usr/bin/open", "-a", BURP_APP, "--args",
+                    "--user-config-file=" + os.path.join(cfg, "bounty-user-options.json"),
+                    "--config-file=" + os.path.join(cfg, "bounty-project-options.json")], check=True)
+    print("Burp launching with upstream proxy 127.0.0.1:8081 (the guard). "
+          "Check: host/bounty guard status")
+    return 0
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -215,6 +240,7 @@ def main(argv=None):
         ("flows", None): cmd_flows,
         ("guard", "status"): lambda a, w: guard_mod.guard_status(a.json),
         ("program", "use"): lambda a, w: guard_mod.program_use(w, a.handle),
+        ("burp", None): cmd_burp,
     }
     fn = handlers.get((args.group, getattr(args, "cmd", None)))
     if fn is None:
