@@ -1,3 +1,4 @@
+mod alerts;
 mod bounty;
 mod lab;
 mod term;
@@ -156,8 +157,14 @@ async fn bounty_ranking() -> Result<bounty::Ranking, String> {
 
 /// Incremental Intigriti sync with progress, then the changes it found. One at a time.
 #[tauri::command]
-async fn bounty_refresh(on_event: Channel<bounty::SyncEvent>, state: State<'_, bounty::Bounty>) -> Result<(), String> {
-    state.refresh(on_event).await
+async fn bounty_refresh(app: AppHandle, on_event: Channel<bounty::SyncEvent>, state: State<'_, bounty::Bounty>) -> Result<(), String> {
+    state.refresh(Some(app), Some(on_event)).await
+}
+
+/// Next/last background sync and the recent notifications (CONTRACTS §9.2).
+#[tauri::command]
+async fn bounty_alert_state(app: AppHandle) -> Result<alerts::AlertState, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<bounty::Bounty>().alert_state()).await.map_err(|e| e.to_string())
 }
 
 /// Open an Intigriti program page in the default browser (nothing else).
@@ -202,8 +209,12 @@ pub fn run() {
             burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
             claude_status, open_tutor,
             bounty_ranking, bounty_refresh, open_program,
-            bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp
+            bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state
         ])
+        .setup(|app| {
+            bounty::spawn_timer(app.handle().clone());
+            Ok(())
+        })
         .on_window_event(|window, event| {
             // Pop-out terminals must not outlive the app.
             if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {

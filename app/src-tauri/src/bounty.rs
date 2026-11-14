@@ -7,13 +7,19 @@ use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 use tauri::ipc::Channel;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::alerts;
 
 /// Repo root (dev builds use the repo's CLI, as for `tutor/`).
 const REPO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+const LAST_ALERTS: usize = 10;
 const PROGRAM_URL_PREFIX: &str = "https://app.intigriti.com/";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -90,6 +96,7 @@ fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
 #[derive(Default)]
 pub struct Bounty {
     refreshing: AtomicBool,
+    alert_state: Mutex<alerts::AlertState>,
 }
 
 /// Clears the "refresh running" flag however the refresh ends.
@@ -174,54 +181,131 @@ pub fn ranking() -> Result<Ranking, String> {
     Ok(Ranking { status, programs })
 }
 
-/// Sync (progress streamed), then the changes it found. Sends exactly one `done` or `error`.
-fn refresh_blocking(on_event: &Channel<SyncEvent>) -> Result<(), String> {
-    let send = |e: SyncEvent| on_event.send(e).map_err(|e| e.to_string());
-    let fail = |(code, message): (String, String)| send(SyncEvent::Error { code, message });
-    let repo = match repo_dir() {
-        Ok(r) => r,
-        Err(m) => return fail(("failed".into(), m)),
-    };
-    let child = cli(&repo, "scripts/secrets.sh", &["exec", "intigriti", "--", "host/bounty", "programs", "sync"])
+/// Sync (progress streamed to `on_progress`), then the changes it found.
+fn sync_blocking(on_progress: &dyn Fn(SyncEvent)) -> Result<Vec<ChangeEvent>, (String, String)> {
+    let repo = repo_dir().map_err(|m| ("failed".to_string(), m))?;
+    let mut child = cli(&repo, "scripts/secrets.sh", &["exec", "intigriti", "--", "host/bounty", "programs", "sync"])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .spawn();
-    let mut child = match child {
-        Ok(c) => c,
-        Err(e) => return fail(("failed".into(), format!("couldn't start the sync: {e}"))),
-    };
+        .spawn()
+        .map_err(|e| ("failed".to_string(), format!("couldn't start the sync: {e}")))?;
     let mut lines = Vec::new();
     if let Some(stderr) = child.stderr.take() {
         for line in BufReader::new(stderr).lines() {
             let Ok(line) = line else { break };
             match parse_progress(&line) {
-                Some(ev) => {
-                    let _ = on_event.send(ev); // the UI may have gone away; keep the sync running
-                }
+                Some(ev) => on_progress(ev),
                 None => lines.push(line),
             }
         }
     }
-    let status = child.wait().map_err(|e| e.to_string())?;
+    let status = child.wait().map_err(|e| ("failed".to_string(), e.to_string()))?;
     if !status.success() {
-        return fail(failure(&lines, "programs sync", status));
+        return Err(failure(&lines, "programs sync", status));
     }
-    match run_json::<Vec<ChangeEvent>>(&repo, &["programs", "changes", "--json"], &[0, 1]) {
-        Ok(changes) => send(SyncEvent::Done { changes }),
-        Err(e) => fail(e),
+    run_json::<Vec<ChangeEvent>>(&repo, &["programs", "changes", "--json"], &[0, 1])
+}
+
+/// The notifications for a finished sync (CONTRACTS §9.2), from the cached ranking and the
+/// guard's active program (both local, read-only).
+fn alerts_for(changes: &[ChangeEvent]) -> Vec<String> {
+    if changes.is_empty() {
+        return vec![];
     }
+    let programs = ranking().map(|r| r.programs).unwrap_or_default();
+    let active = guard_status().ok().and_then(|g| g.program);
+    alerts::select(changes, &alerts::Context::from_ranking(&programs, active))
 }
 
 impl Bounty {
-    pub async fn refresh(&self, on_event: Channel<SyncEvent>) -> Result<(), String> {
+    /// One refresh (UI with a channel, `app` None only in tests,, or the background timer without). Sends exactly one
+    /// `done` or `error` to the channel; after a successful sync emits `bounty-synced` and sends
+    /// the notifications.
+    pub async fn refresh(&self, app: Option<AppHandle>, on_event: Option<Channel<SyncEvent>>) -> Result<(), String> {
         if self.refreshing.swap(true, Ordering::SeqCst) {
             return Err("refresh already running".into());
         }
         let _guard = RefreshGuard(&self.refreshing);
-        tauri::async_runtime::spawn_blocking(move || refresh_blocking(&on_event))
-            .await
-            .map_err(|e| e.to_string())?
+        let ch = on_event.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            // The UI may have gone away; keep the sync running.
+            sync_blocking(&|ev| if let Some(c) = &ch { let _ = c.send(ev); })
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        match result {
+            Ok(changes) => {
+                self.alert_state.lock().unwrap().last_sync_at = Some(alerts::iso_utc(SystemTime::now()));
+                if let Some(app) = &app {
+                    let _ = app.emit("bounty-synced", &changes);
+                }
+                let c2 = changes.clone();
+                let texts = tauri::async_runtime::spawn_blocking(move || {
+                    let texts = alerts_for(&c2);
+                    for t in &texts {
+                        let _ = alerts::notify(t);
+                    }
+                    texts
+                })
+                .await
+                .unwrap_or_default();
+                if !texts.is_empty() {
+                    let ts = alerts::iso_utc(SystemTime::now());
+                    let mut st = self.alert_state.lock().unwrap();
+                    let mut fresh: Vec<alerts::Alert> = texts.into_iter().map(|text| alerts::Alert { ts: ts.clone(), text }).collect();
+                    fresh.extend(st.last_alerts.drain(..));
+                    fresh.truncate(LAST_ALERTS);
+                    st.last_alerts = fresh;
+                }
+                match on_event {
+                    Some(c) => c.send(SyncEvent::Done { changes }).map_err(|e| e.to_string()),
+                    None => Ok(()),
+                }
+            }
+            Err((code, message)) => match on_event {
+                Some(c) => c.send(SyncEvent::Error { code, message }).map_err(|e| e.to_string()),
+                None => Err(format!("{code}: {message}")),
+            },
+        }
     }
+
+    pub fn is_refreshing(&self) -> bool {
+        self.refreshing.load(Ordering::SeqCst)
+    }
+
+    pub fn set_next_sync(&self, at: Option<SystemTime>) {
+        self.alert_state.lock().unwrap().next_sync_at = at.map(alerts::iso_utc);
+    }
+
+    /// `bounty_alert_state()`; before the first refresh in this run, last_sync_at comes from
+    /// `programs status --json`.
+    pub fn alert_state(&self) -> alerts::AlertState {
+        let mut st = self.alert_state.lock().unwrap().clone();
+        if st.last_sync_at.is_none() {
+            if let Ok(repo) = repo_dir() {
+                st.last_sync_at = run_json::<Status>(&repo, &["programs", "status", "--json"], &[0]).ok().and_then(|s| s.last_sync_at);
+            }
+        }
+        st
+    }
+}
+
+/// Background sync (CONTRACTS §9.2): every 20 min ± 2 min, the first one 20 min after start;
+/// skipped while another refresh runs.
+pub fn spawn_timer(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let seed = SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos() as u64).unwrap_or(0);
+            let delay = alerts::next_delay(seed);
+            let state = app.state::<Bounty>();
+            state.set_next_sync(Some(SystemTime::now() + delay));
+            tokio::time::sleep(delay).await;
+            if state.is_refreshing() {
+                continue;
+            }
+            let _ = state.refresh(Some(app.clone()), None).await;
+        }
+    });
 }
 
 /// Only Intigriti program pages, and nothing a URL parser could read differently.
@@ -548,10 +632,10 @@ mod tests {
         });
         let state = Bounty::default();
         let first = tauri::async_runtime::block_on(async {
-            let a = state.refresh(ch.clone());
+            let a = state.refresh(None, Some(ch.clone()));
             let b = async {
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                state.refresh(ch.clone()).await
+                state.refresh(None, Some(ch.clone())).await
             };
             futures_util::join!(a, b)
         });
