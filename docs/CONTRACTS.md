@@ -216,3 +216,48 @@ decides, documents it in the PR). With `--actor claude` and `automation: forbidd
 `.sops.yaml` rules cover both paths. Nothing decrypted is written to disk. The required request
 header value comes from `INTIGRITI_USERNAME` and is passed to the guard at `program use` time via
 `docker exec -e`, kept in the guard's memory only.
+
+## 9. App ↔ backend: Programs screen (Tauri commands)
+
+The app never talks to Intigriti itself. Rust runs the same CLI the terminal uses and passes its JSON
+through. Repo root = `CARGO_MANIFEST_DIR/../..` (as for `tutor/`). When spawning, Rust prepends
+`/opt/homebrew/bin:/usr/local/bin` to `PATH` and sets `SOPS_AGE_KEY_FILE` to
+`~/.config/sops/age/keys.txt` if it is unset (a GUI app doesn't get the shell's environment).
+
+| Command | Runs | Returns |
+|---|---|---|
+| `bounty_ranking()` | `host/bounty programs status --json` and `host/bounty programs rank --json --include-join` | `Ranking` |
+| `bounty_refresh(on_event: Channel<SyncEvent>)` | `scripts/secrets.sh exec intigriti -- host/bounty programs sync`, then `host/bounty programs changes --json` | `()` after `done`/`error` was sent; a second call while one runs returns `Err("refresh already running")` |
+| `open_program(url)` | `/usr/bin/open <url>` | `()`; `Err` unless `url` starts with `https://app.intigriti.com/` |
+
+```ts
+type Ranking = {
+  status: { last_sync_at: string | null; programs: number; open: number; needs_join: number };
+  programs: RankedProgram[];            // rank --json order: ranked first, then join (unless mixed), then excluded
+};
+type RankedProgram = {
+  handle: string; name: string; url: string;
+  total: number | null;                 // null when excluded
+  factors: { payout: number | null; findability: number | null; competition: number | null; friction: number | null };
+  inputs: { max_eur: number | null; min_eur: number | null; surface: number | null;
+            days_since_scope_change: number | null; confidentiality: string | null;
+            rate_limit_rps: number | null; [k: string]: unknown };
+  flags: string[];                      // "join", "hdr", "no-auto", …
+  excluded: string | null;              // "no-bounty" | "no-safe-harbour" | "no-web-scope" | null
+};
+type SyncEvent =
+  | { kind: "progress"; done: number; total: number; text: string }
+  | { kind: "done"; changes: ChangeEvent[] }        // the UI then calls bounty_ranking() again
+  | { kind: "error"; code: string; message: string }; // code from `bounty: <code>:`; message has no token
+type ChangeEvent = { ts: string; handle: string; kind: string; detail: Record<string, unknown> };
+```
+
+CLI additions behind this (BE-12):
+- `programs sync` is **incremental** by default: list + new activities, then detail only for programs
+  that are new, changed in the list record (status, bounty, confidentiality), have a new domains /
+  rules / status activity since the last sync, have no detail yet, or whose detail is > 7 days old.
+  `--full` re-fetches every open program's detail. Still ≤ 1 request/second.
+- Progress on stderr, one line per detail request: `bounty: progress: <done>/<total> <handle>`.
+- `programs status --json` → `Ranking.status`.
+- `programs rank --json` items gain `name` and `url`.
+- `programs changes --json` → `ChangeEvent[]` (exit codes unchanged: 1 = nothing changed, still valid JSON `[]`).

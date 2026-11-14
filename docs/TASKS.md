@@ -35,6 +35,14 @@ next slice (ADR 003).
 | ARC-2 | Architect | Finalise CONTRACTS §2/§4 from the BE-1 report | BE-1 | done | – |
 | ARC-3 | Architect + user | Review the ranking together, adjust weights, **pick the first program**, read its full rules | BE-3 | in progress | `program use` target chosen; rules read by the user |
 
+## Slice 1b: Programs screen in the app (user request 2026-11-14)
+
+| Id | Owner | Task | Depends | Status | Done when |
+|---|---|---|---|---|---|
+| BE-12 | Backender | Incremental `programs sync`, progress lines, `programs status --json`, `rank --json` name+url, `changes --json` (CONTRACTS §9) | – | in progress | unit tests; a second real sync right after the first makes ≤ 5 detail requests |
+| BE-13 | Backender | Tauri commands `bounty_ranking`, `bounty_refresh` (streams progress, one at a time), `open_program` (Intigriti URLs only) (CONTRACTS §9) | BE-12 | in progress | Rust unit tests (URL check, event parsing); commands work from `make app-dev` |
+| FE-2 | Frontender | Bug bounty mode opens on the Programs table: cached ranking at once, background refresh on every app start, keyboard-first (filter, sort, j/k, Enter opens the program), status line, changes since last sync; app remembers the last mode, default Bug bounty. `docs/design.md` notes for the bounty look in the PR text | – (mock until BE-13) | in progress | type-check + build pass; `make app-shots` states: loading, ranked, refreshing, error, empty; works against the real backend |
+
 ## Slice 2: scope guard (before any request to a target)
 
 | Id | Owner | Task | Depends | Status | Done when |
