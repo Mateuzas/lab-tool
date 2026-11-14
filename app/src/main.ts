@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { setupPopout, setupTerminal } from "./terminal";
 import { setupTools } from "./tools";
 import { setupModes } from "./modes";
+import { setupPrograms } from "./programs";
 
 /** Mirrors lab::LabStatus in src-tauri/src/lab.rs. */
 interface LabStatus {
@@ -328,7 +329,15 @@ async function start() {
 
   terminal = setupTerminal(() => $("tab-terminal").click());
   tools = setupTools(() => status?.lab?.["state"] === "connected");
-  modes = setupModes(() => status, poll);
+  const programs = setupPrograms({
+    visible: () => document.body.dataset.view === "bounty",
+    setModeState: (text, state) => {
+      const el = $("mode-bounty-state");
+      el.textContent = text;
+      el.dataset.state = state;
+    },
+  });
+  modes = setupModes(() => status, poll, (m) => { if (m === "bounty") programs.focus(); });
   setupTabs();
 
   // Adding a VPN file: the picker reads it here; the backend checks and saves it in the lab.
@@ -404,6 +413,8 @@ async function start() {
     drawControls();
   });
 
+  // Bug bounty: the cached ranking at once, then a background refresh, on every app start.
+  void programs.start();
   poll();
   loadFiles();
   setInterval(poll, POLL_MS);
