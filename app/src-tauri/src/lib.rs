@@ -29,6 +29,8 @@ async fn add_vpn_file(name: String, content: String) -> Result<lab::VpnFile, Str
 
 #[tauri::command]
 async fn start_lab() -> Result<(), String> {
+    // One mode at a time: the bounty guard goes before the lab starts (CONTRACTS §9.1).
+    tauri::async_runtime::spawn_blocking(bounty::guard_stop_if_running).await.map_err(|e| e.to_string())??;
     lab::start_lab().await
 }
 
@@ -164,6 +166,30 @@ fn open_program(url: String) -> Result<(), String> {
     bounty::open_program(&url)
 }
 
+/// The scope guard's state (CONTRACTS §9.1).
+#[tauri::command]
+async fn bounty_guard_status() -> Result<bounty::GuardStatus, String> {
+    tauri::async_runtime::spawn_blocking(bounty::guard_status).await.map_err(|e| e.to_string())?
+}
+
+/// Start the guard if needed, then switch it to `handle`.
+#[tauri::command]
+async fn bounty_use(handle: String) -> Result<bounty::GuardStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::use_program(&handle)).await.map_err(|e| e.to_string())?
+}
+
+/// Stop the guard (never purges).
+#[tauri::command]
+async fn bounty_guard_stop() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(bounty::guard_stop).await.map_err(|e| e.to_string())?
+}
+
+/// Burp through the guard; `Some(note)` when Burp was already open.
+#[tauri::command]
+async fn bounty_open_burp() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(bounty::open_burp).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -175,7 +201,8 @@ pub fn run() {
             term_open, term_attach, term_popout, term_dock, term_write, term_resize, term_close,
             burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
             claude_status, open_tutor,
-            bounty_ranking, bounty_refresh, open_program
+            bounty_ranking, bounty_refresh, open_program,
+            bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp
         ])
         .on_window_event(|window, event| {
             // Pop-out terminals must not outlive the app.
