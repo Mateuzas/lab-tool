@@ -101,6 +101,30 @@ const CHANGES = [
   { ts, handle: "intigriti-aikido", kind: "program-new", detail: { name: "Aikido Security: Bug Bounty Program", status: "open", confidentiality: "public", max_eur: 3000, detail: "ok" } },
   { ts, handle: "intigriti-excoscalebugbounty", kind: "scope-removed", detail: { list: "in", type: "domain", value: "legacy-portal.exoscale.com", tier: "Tier 3", version: 9 } },
 ];
+
+// ---- Scope guard (CONTRACTS §9.1): ?g=off | starting | active | error | refusals | lost
+const guardMode = new URLSearchParams(location.search).get("g") ?? "off";
+const G0 = { running: false, status: "down", program: null, rate_rps: null, automation: null, egress_ip: null, last_error: null, last_refusals: [] as unknown[] };
+const gActive = (program: string) => ({ ...G0, running: true, status: "active", program, rate_rps: 5, automation: "allowed (rate-limited)", egress_ip: "185.12.44.9" });
+const REFUSALS = [
+  { ts: iso(0), url: "https://admin.dropbox.com/login", reason: "out of scope" },
+  { ts: iso(1), url: "https://legacy-portal.exoscale.com/api/v1/users?limit=500", reason: "different program" },
+  { ts: iso(3), url: "https://www.dropbox.com/s/abc/file.zip", reason: "rate limit (5 req/s)" },
+];
+let guard: Record<string, unknown> = ({
+  off: G0,
+  starting: { ...G0, running: true, status: "starting" },
+  active: gActive("intigriti-dropbox"),
+  error: { ...G0, running: true, status: "error", last_error: "mitmproxy exited (port 8080 in use)" },
+  refusals: { ...gActive("intigriti-dropbox"), last_refusals: REFUSALS },
+  lost: gActive("intigriti-dropbox"),
+} as Record<string, Record<string, unknown>>)[guardMode] ?? G0;
+let guardPolls = 0;
+function guardStatus() {
+  // "lost": active on the first poll, then Docker restarts and the policy is gone.
+  if (guardMode === "lost" && ++guardPolls > 1) guard = { ...G0, running: true, status: "no-profile" };
+  return guard;
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let refreshing = false;
 
@@ -134,6 +158,10 @@ async function bountyRefresh(channel: { id: number }) {
     if (cmd === "lab_status") return current;
     if (cmd === "bounty_ranking") { await sleep(progMode === "loading" ? 60000 : 40); return ranking(); }
     if (cmd === "bounty_refresh") return bountyRefresh(args.onEvent as unknown as { id: number });
+    if (cmd === "bounty_guard_status") return guardStatus();
+    if (cmd === "bounty_use") { await sleep(500); guard = gActive(args.handle); return guard; }
+    if (cmd === "bounty_guard_stop") { await sleep(300); guard = G0; return null; }
+    if (cmd === "bounty_open_burp") return guard.running ? null : "Burp opened. Use a program first, or Burp has no upstream proxy.";
     if (cmd === "open_program") {
       if (!String(args.url).startsWith("https://app.intigriti.com/")) throw "not an Intigriti program URL";
       console.info("open_program", args.url);

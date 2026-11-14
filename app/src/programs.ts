@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { setupGuard } from "./guard";
 
 /**
  * Bug bounty's Programs screen (FE-2). Shows the cached ranking at once, refreshes in the
@@ -144,6 +145,12 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   const wrap = $("pg-table-wrap");
   wrap.tabIndex = -1; // focus target for the keyboard when nothing else has focus
 
+  const guard = setupGuard({
+    visible: opts.visible,
+    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || h,
+    onChange: () => markActive(),
+  });
+
   // ---- Header (built once) ----
   const headRow = $("pg-head-row");
   for (const c of COLS) {
@@ -252,6 +259,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
 
     if (selected === null || !rows.has(selected)) selected = visibleHandles[0] ?? null;
     markSelected(false);
+    markActive();
     for (const th of headRow.children) {
       const k = (th as HTMLElement).dataset.col;
       th.setAttribute("aria-sort", k === sort.key ? (sort.dir === 1 ? "ascending" : "descending") : "none");
@@ -333,6 +341,22 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       else tr.removeAttribute("aria-selected");
     }
     if (scroll && selected) rows.get(selected)?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** The program loaded in the guard: a marker in the rank cell and a tinted name. */
+  function markActive() {
+    const on = guard.active();
+    for (const [h, tr] of rows) {
+      const is = h === on;
+      tr.classList.toggle("active", is);
+      const name = tr.querySelector(".name")!;
+      name.querySelector(".pg-live")?.remove();
+      if (is) {
+        const tag = el("span", "pg-live", "guard");
+        tag.title = "Loaded in the scope guard";
+        name.querySelector(".handle")!.after(tag);
+      }
+    }
   }
 
   function select(handle: string) {
@@ -454,6 +478,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   async function load() {
     try {
       ranking = await invoke<Ranking>("bounty_ranking");
+      guard.redraw(); // names for the indicator
       loadError = "";
     } catch (e) {
       loadError = String(e);
@@ -527,7 +552,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "/": filterBox.focus(); filterBox.select(); break;
       case "j": case "ArrowDown": move(1); break;
       case "k": case "ArrowUp": move(-1); break;
-      case "Home": case "g": move("top"); break;
+      case "Home": move("top"); break;
       case "End": case "G": move("end"); break;
       case "PageDown": move(Math.max(1, Math.floor(wrap.clientHeight / 30) - 1)); break;
       case "PageUp": move(-Math.max(1, Math.floor(wrap.clientHeight / 30) - 1)); break;
@@ -536,9 +561,14 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "r": void refresh(); break;
       case "x": showExcluded = !showExcluded; render(); break;
       case "J": mixJoin = !mixJoin; render(); break;
+      case "u": if (selected) void guard.use(selected); break;
+      case "b": void guard.burp(); break;
+      case "g": void guard.stop(); break;
+      case "R": guard.toggleRefusals(); break;
       case "c": if (changes.length) { changesOpen = !changesOpen; drawChrome(); } break;
       case "Escape":
-        if (changesOpen) { changesOpen = false; drawChrome(); }
+        if (guard.escape()) { /* closed the popover or cancelled a switch */ }
+        else if (changesOpen) { changesOpen = false; drawChrome(); }
         else if (filter) { filter = ""; filterBox.value = ""; render(); }
         else handled = false;
         break;
@@ -559,9 +589,11 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   return {
     /** App start: the cached ranking at once, then a background refresh. */
     async start() {
+      guard.wake();
       await load();
       await refresh();
     },
-    focus() { if (document.activeElement === document.body || !document.activeElement) wrap.focus({ preventScroll: true }); },
+    focus() {
+      guard.wake(); if (document.activeElement === document.body || !document.activeElement) wrap.focus({ preventScroll: true }); },
   };
 }
