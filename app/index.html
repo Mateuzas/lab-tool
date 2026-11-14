@@ -179,9 +179,21 @@
       <header class="pg-head">
         <h1 id="programs-title">Programs</h1>
         <p class="pg-status" id="pg-status" role="status" aria-live="polite"></p>
+        <div class="pg-guard-box">
+          <button type="button" class="pg-guard" id="pg-guard" data-state="off" aria-expanded="false" aria-controls="pg-refusals" aria-keyshortcuts="Shift+R">
+            <span class="g-dot" aria-hidden="true"></span><span class="g-text" role="status" aria-live="polite">Guard off</span><span class="g-ref" hidden></span>
+          </button>
+          <section class="pg-refusals" id="pg-refusals" aria-label="Last requests the guard refused" hidden>
+            <p>Refused by the scope guard, newest first</p>
+            <ol id="pg-refusals-items"></ol>
+          </section>
+        </div>
+        <button type="button" class="pg-toggle" id="pg-burp" aria-keyshortcuts="b">Burp <kbd>b</kbd></button>
+        <button type="button" class="pg-toggle" id="pg-guard-stop" aria-keyshortcuts="g">Stop guard <kbd>g</kbd></button>
         <button type="button" class="pg-refresh" id="pg-refresh" aria-keyshortcuts="r">Refresh <kbd>r</kbd></button>
       </header>
       <p class="pg-error" id="pg-error" role="alert" hidden></p>
+      <p class="pg-guard-line" id="pg-guard-line" role="alert" hidden></p>
 
       <div class="pg-tools">
         <label class="pg-filter">
@@ -215,9 +227,10 @@
         <p class="pg-keys" aria-label="Keyboard shortcuts">
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
+          <span><kbd>u</kbd> use program</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span>
           <span>click a heading to sort</span>
         </p>
-        <p class="pg-note">Runs on this Mac and starts no container. Testing through the scope guard comes in a later version.</p>
+        <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
       </footer>
     </main>
   </body>
