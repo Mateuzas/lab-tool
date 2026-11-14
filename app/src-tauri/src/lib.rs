@@ -1,3 +1,4 @@
+mod bounty;
 mod lab;
 mod term;
 mod tools;
@@ -145,16 +146,36 @@ fn get_tool(tool: String) -> Result<(), String> {
     tools::open_download(&tool)
 }
 
+/// Programs screen (CONTRACTS §9): cached ranking from the workspace, no network.
+#[tauri::command]
+async fn bounty_ranking() -> Result<bounty::Ranking, String> {
+    tauri::async_runtime::spawn_blocking(bounty::ranking).await.map_err(|e| e.to_string())?
+}
+
+/// Incremental Intigriti sync with progress, then the changes it found. One at a time.
+#[tauri::command]
+async fn bounty_refresh(on_event: Channel<bounty::SyncEvent>, state: State<'_, bounty::Bounty>) -> Result<(), String> {
+    state.refresh(on_event).await
+}
+
+/// Open an Intigriti program page in the default browser (nothing else).
+#[tauri::command]
+fn open_program(url: String) -> Result<(), String> {
+    bounty::open_program(&url)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(term::Terminals::default())
         .manage(tools::Tools::default())
+        .manage(bounty::Bounty::default())
         .invoke_handler(tauri::generate_handler![
             lab_status, vpn_files, connect, disconnect, set_target, add_vpn_file, start_lab, stop_lab,
             term_open, term_attach, term_popout, term_dock, term_write, term_resize, term_close,
             burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
-            claude_status, open_tutor
+            claude_status, open_tutor,
+            bounty_ranking, bounty_refresh, open_program
         ])
         .on_window_event(|window, event| {
             // Pop-out terminals must not outlive the app.
