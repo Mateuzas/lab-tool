@@ -103,7 +103,15 @@ header. **All three must agree** (case-insensitive, trailing dot removed), other
 6. rate limit bucket empty → wait up to 10 s, then `rate-limited`. Rate = `rules.rate_limit_rps`;
    null → 2 req/s; 0 → only `--actor human` traffic (Burp, your terminal), tools and Claude refused
    with `automation-forbidden`
-7. otherwise allow, add the required header, forward.
+7. otherwise allow, apply the program's identification, forward:
+   - `request_header` template → that header (e.g. `X-Intigriti-Username: mateuzas`), replacing any
+     existing one;
+   - `user_agent` template → the `User-Agent` becomes the template with the username filled in and
+     the client's original User-Agent in the `<user agent>` slot (Dropbox:
+     `Intigriti - mateuzas - Mozilla/5.0 …`); a missing original becomes `kali-lab`.
+   Placeholders are matched case-insensitively in both spellings platforms use: `{Username}`,
+   `<username>`, and `<user agent>` / `{UserAgent}`. A template with an unknown placeholder makes
+   `program use` fail (exit 4) rather than send a malformed header.
 
 `url` entries also check the path prefix (after the request line is known).
 
@@ -120,6 +128,8 @@ Reason codes: `no-profile`, `host-mismatch`, `out-of-scope`, `not-in-scope`, `in
 | tool user (human) | uid `hunter`; env `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` = `http://127.0.0.1:8080` |
 | guard CA | generated per container at first start in `/bounty/.guard-ca/` (tmpfs copy for mitmdump); installed in the container's trust store; Burp is told not to validate the upstream |
 | control | `docker exec kali-bounty bounty-ctl reload` re-reads `/bounty/active` and the profile |
+| container | `docker run -d --name kali-bounty --init --restart unless-stopped --cap-add=NET_ADMIN -p 127.0.0.1:8081:8080 -v $BOUNTY_WORKSPACE:/bounty kali-lab:dev bounty-supervisor` (no `/dev/net/tun`, no VPN, no other mount); started by `host/bounty guard start`, stopped by `guard stop`; starting it stops `kali-lab` and vice versa (one mode at a time) |
+| users | `guard` uid 990 (system, no shell), `hunter` uid 1000 (home `/home/hunter`); both created in the image |
 
 ### 3.4 `recon-sources.json`
 `{"hosts": ["crt.sh", "web.archive.org", ...], "rate_limit_rps": 2}`. Exact hosts only, no wildcards.

@@ -33,7 +33,7 @@ next slice (ADR 003).
 | BE-3 | Backender | `programs rank` with factor scores, hard filters, `--explain`, `--json`, default `config/ranking.json` (CONTRACTS §4) | BE-2 | done (#6) | unit tests per factor and for missing inputs; top 20 printed for review |
 | BE-4 | Backender | `programs changes` + `history.jsonl` (new programs, scope added/removed, bounty and rules changed) | BE-2 | done (#6) | tests with two synthetic syncs |
 | ARC-2 | Architect | Finalise CONTRACTS §2/§4 from the BE-1 report | BE-1 | done | – |
-| ARC-3 | Architect + user | Review the ranking together, adjust weights, **pick the first program**, read its full rules | BE-3 | in progress | `program use` target chosen; rules read by the user |
+| ARC-3 | Architect + user | Review the ranking together, adjust weights, **pick the first program**, read its full rules | BE-3 | done: **Dropbox** (`intigriti-dropbox`) | `program use` target chosen; rules read by the user |
 
 ## Slice 1b: Programs screen in the app (user request 2026-11-14)
 
@@ -55,10 +55,11 @@ Follow-ups from slice 1b:
 
 | Id | Owner | Task | Depends | Status | Done when |
 |---|---|---|---|---|---|
-| OPS-4 | DevOps | Image: mitmproxy (pinned), users `guard` and `hunter`, recon tools (subfinder, httpx, katana, ffuf, nuclei; pinned); `host/bounty` container start/stop for `kali-bounty` per ADR 002 | – | todo | image builds in CI; `kali-bounty` starts with only `workspace/bounty` mounted |
-| BE-5 | Backender | `bounty-guard` addon + `bounty-supervisor` + iptables uid lock + `bounty-ctl reload` + `bounty-run` (CONTRACTS §3, §5, §6) | OPS-4, BE-2 | todo | `tests/bounty-guard-test.sh` proves, with local listeners and a fake profile: no profile refuses all; out-of-scope beats in-scope; host mismatch refused; internal addresses refused; a tool ignoring the proxy can't connect; rate limit holds; header added; actor header stripped; every flow logged |
+| OPS-4 | DevOps | Image: mitmproxy, users `guard` (990) and `hunter` (1000), recon tools (subfinder, httpx-toolkit, katana, ffuf, nuclei, dnsx) from Kali's repo (CONTRACTS §3.3) | – | in progress | image builds in CI; `kali-bounty` starts with only `workspace/bounty` mounted |
+| BE-5 | Backender | `bounty-guard` addon + `bounty-supervisor` + iptables uid lock + `bounty-ctl reload` + `bounty-run`; `host/bounty guard start|stop|status` (CONTRACTS §3, §5, §6) | OPS-4, BE-2 | todo | `tests/bounty-guard-test.sh` proves, with local listeners and a fake profile: no profile refuses all; out-of-scope beats in-scope; host mismatch refused; internal addresses refused; a tool ignoring the proxy can't connect; rate limit holds; header added; actor header stripped; every flow logged |
 | BE-6 | Backender | `program use` wires the active profile and the header value; Burp launch with upstream proxy `127.0.0.1:8081` | BE-5 | todo | Burp request to an in-scope test host shows in the flow log; out-of-scope gets the 403 |
 | BE-7 | Backender | `hunter/` Claude Code project: CLAUDE.md draft for the Architect, settings (read the program folder, Burp MCP read-only, `bounty-run --actor claude` only, approval per command) | BE-5 | todo | Claude can read a profile and run an approved in-scope `curl`, labelled `claude` in the log; an unapproved command doesn't run |
+| USER-3 | User | Dropbox prep: find your `@intigriti.me` alias in your Intigriti profile; create two free Dropbox test accounts with it (e.g. `you+a@intigriti.me`, `you+b@intigriti.me`, so you can test one account against the other); install the Burp CA nothing else yet | – | todo | two test accounts exist |
 | USER-2 | User | **First hunting session** on the chosen program with the CLI + Burp; keep a friction list | BE-6 | todo | friction list → next slice |
 
 ## Later (in rough order, re-planned after each hunting session)
