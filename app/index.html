@@ -7,7 +7,7 @@
     <script type="module" src="/src/main.ts" defer></script>
   </head>
   <body>
-    <!-- Modes: Lab and Bug bounty are separate apps. Only one runs; launching one stops the other. -->
+    <!-- Modes: Lab and Bug bounty. Lab runs a container; Bug bounty's Programs screen runs on this Mac. -->
     <nav class="modes" aria-label="Mode">
       <div class="modes-inner">
         <button type="button" class="mode" id="mode-lab" data-mode="lab" aria-pressed="true">
@@ -16,7 +16,7 @@
         </button>
         <button type="button" class="mode" id="mode-bounty" data-mode="bounty" aria-pressed="false">
           <span class="swatch" aria-hidden="true"></span><span class="mode-name">Bug bounty</span>
-          <span class="mode-state" id="mode-bounty-state" data-state="stopped">Stopped</span>
+          <span class="mode-state" id="mode-bounty-state" data-state="idle"></span>
         </button>
       </div>
     </nav>
@@ -168,17 +168,57 @@
           <p class="lead" id="launch-lead"></p>
           <p class="tool-state" id="launch-state" data-level="off"><span class="dot" aria-hidden="true"></span><span id="launch-state-text"></span></p>
           <button type="button" class="primary" id="launch-action">Launch</button>
-          <div class="confirm" id="launch-confirm" role="group" aria-labelledby="launch-confirm-text" hidden>
-            <p id="launch-confirm-text"></p>
-            <div class="confirm-buttons">
-              <button type="button" class="primary" id="launch-yes"></button>
-              <button type="button" id="launch-no">Cancel</button>
-            </div>
-          </div>
           <p class="tip" id="launch-tip"></p>
           <p class="error" id="launch-error" role="alert" hidden></p>
         </div>
       </section>
+    </main>
+
+    <!-- Bug bounty: the Programs screen. Dense and keyboard-first (docs/CONTRACTS.md §9). -->
+    <main class="programs" id="programs" aria-labelledby="programs-title">
+      <header class="pg-head">
+        <h1 id="programs-title">Programs</h1>
+        <p class="pg-status" id="pg-status" role="status" aria-live="polite"></p>
+        <button type="button" class="pg-refresh" id="pg-refresh" aria-keyshortcuts="r">Refresh <kbd>r</kbd></button>
+      </header>
+      <p class="pg-error" id="pg-error" role="alert" hidden></p>
+
+      <div class="pg-tools">
+        <label class="pg-filter">
+          <span class="visually-hidden">Filter programs</span>
+          <input id="pg-filter" type="search" autocomplete="off" spellcheck="false"
+            placeholder="Filter by name, handle or industry" aria-keyshortcuts="/" />
+          <kbd aria-hidden="true">/</kbd>
+        </label>
+        <button type="button" class="pg-toggle" id="pg-changes" aria-expanded="false" aria-controls="pg-changes-list" aria-keyshortcuts="c" hidden></button>
+        <button type="button" class="pg-toggle" id="pg-join" aria-pressed="false" aria-keyshortcuts="Shift+J"></button>
+        <button type="button" class="pg-toggle" id="pg-excluded" aria-pressed="false" aria-keyshortcuts="x"></button>
+      </div>
+
+      <section class="pg-changes" id="pg-changes-list" aria-label="Changes since the last sync" hidden>
+        <div class="pg-changes-head">
+          <p id="pg-changes-title"></p>
+          <button type="button" id="pg-changes-dismiss">Dismiss</button>
+        </div>
+        <ul id="pg-changes-items"></ul>
+      </section>
+
+      <div class="pg-table-wrap" id="pg-table-wrap">
+        <table class="pg-table" id="pg-table" aria-describedby="pg-status">
+          <thead><tr id="pg-head-row"></tr></thead>
+          <tbody id="pg-body"></tbody>
+        </table>
+        <div class="pg-empty" id="pg-empty" hidden></div>
+      </div>
+
+      <footer class="pg-foot">
+        <p class="pg-keys" aria-label="Keyboard shortcuts">
+          <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
+          <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
+          <span>click a heading to sort</span>
+        </p>
+        <p class="pg-note">Runs on this Mac and starts no container. Testing through the scope guard comes in a later version.</p>
+      </footer>
     </main>
   </body>
 </html>

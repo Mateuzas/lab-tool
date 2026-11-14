@@ -3,6 +3,8 @@
  *   npm run dev  ->  http://localhost:1420/?s=<scenario>
  * Loaded only when import.meta.env.DEV and not inside Tauri, so it never ships.
  */
+import { ROWS } from "./programs-data";
+
 const now = () => Math.floor(Date.now() / 1000);
 const files = [
   { file: "starting_points_eu-starting-point-2-dhcp.ovpn", label: "Starting Point (EU 2)" },
@@ -75,11 +77,68 @@ function startShell(id: number, channel: { id: number }) {
 const toolMode = new URLSearchParams(location.search).get("tools") ?? "ready";
 const toolState = { installed: toolMode !== "missing", running: toolMode === "running" };
 
+// ---- Bug bounty Programs screen (CONTRACTS §9): ?p=loaded | loading | refreshing | error | changes | empty | empty-error
+const progMode = new URLSearchParams(location.search).get("p") ?? "loaded";
+const iso = (minAgo: number) => new Date(Date.now() - minAgo * 60000).toISOString();
+const programs = progMode.startsWith("empty") ? [] : ROWS.map(([handle, name, url, industry, total, f, i, flags, excluded]) => ({
+  handle, name, url, industry, total,
+  factors: { payout: f[0], findability: f[1], competition: f[2], friction: f[3] },
+  inputs: { max_eur: i[0], min_eur: i[1], surface: i[2], days_since_scope_change: i[3], confidentiality: i[4], rate_limit_rps: i[5] },
+  flags, excluded,
+}));
+let lastSync: string | null = progMode.startsWith("empty") ? null : iso(14);
+const ranking = () => ({
+  status: { last_sync_at: lastSync, programs: programs.length,
+    open: programs.length, needs_join: programs.filter((p) => !p.excluded && p.flags.includes("join")).length },
+  programs,
+});
+const ts = iso(0);
+const CHANGES = [
+  { ts, handle: "intigriti-dropbox", kind: "scope-added", detail: { list: "in", type: "wildcard", value: "*.dropboxbusiness.com", tier: "Tier 1", version: 14 } },
+  { ts, handle: "intigriti-dropbox", kind: "scope-added", detail: { list: "in", type: "url", value: "https://paper.dropbox.com", tier: "Tier 2", version: 14 } },
+  { ts, handle: "intigriti-intergamma", kind: "bounty-changed", detail: { from: { min: 50, max: 4000, currency: "EUR" }, to: { min: 50, max: 5500, currency: "EUR" } } },
+  { ts, handle: "intigriti-digitalocean", kind: "rules-changed", detail: { from_version: 6, to_version: 7, fields: { rate_limit_rps: { from: 5, to: 10 } }, text_changed: true } },
+  { ts, handle: "intigriti-aikido", kind: "program-new", detail: { name: "Aikido Security: Bug Bounty Program", status: "open", confidentiality: "public", max_eur: 3000, detail: "ok" } },
+  { ts, handle: "intigriti-excoscalebugbounty", kind: "scope-removed", detail: { list: "in", type: "domain", value: "legacy-portal.exoscale.com", tier: "Tier 3", version: 9 } },
+];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let refreshing = false;
+
+async function bountyRefresh(channel: { id: number }) {
+  if (refreshing) throw "refresh already running";
+  refreshing = true;
+  const cb = callbacks.get(channel.id)!;
+  let index = 0;
+  const send = (message: unknown) => cb({ index: index++, message });
+  const total = progMode.startsWith("empty") ? 199 : 40;
+  const stopAt = progMode === "refreshing" || progMode === "empty" ? 12 : progMode === "loaded" || progMode === "loading" ? 6 : 3;
+  for (let done = 1; done <= stopAt; done++) {
+    await sleep(120);
+    send({ kind: "progress", done, total, text: programs[done]?.handle ?? `intigriti-program-${done}` });
+  }
+  if (progMode === "refreshing" || progMode === "empty") return new Promise(() => {}); // stays mid-refresh for the shot
+  refreshing = false;
+  if (progMode === "error" || progMode === "empty-error") {
+    send({ kind: "error", code: "secrets", message: "the Intigriti token can't be decrypted (no age key at ~/.config/sops/age/keys.txt). Check SOPS_AGE_KEY_FILE." });
+    return null;
+  }
+  lastSync = iso(0);
+  send({ kind: "done", changes: progMode === "changes" ? CHANGES : [] });
+  return null;
+}
+
 (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
   transformCallback: (cb: (m: unknown) => void) => { const id = nextCb++; callbacks.set(id, cb); return id; },
   unregisterCallback: (id: number) => callbacks.delete(id),
   invoke: async (cmd: string, args: Record<string, string>) => {
     if (cmd === "lab_status") return current;
+    if (cmd === "bounty_ranking") { await sleep(progMode === "loading" ? 60000 : 40); return ranking(); }
+    if (cmd === "bounty_refresh") return bountyRefresh(args.onEvent as unknown as { id: number });
+    if (cmd === "open_program") {
+      if (!String(args.url).startsWith("https://app.intigriti.com/")) throw "not an Intigriti program URL";
+      console.info("open_program", args.url);
+      return null;
+    }
     if (cmd === "stop_lab") { await new Promise((r) => setTimeout(r, 600)); current = scenarios.stopped.status; return null; }
     if (cmd === "start_lab") { await new Promise((r) => setTimeout(r, 600)); current = scenarios.connected.status; return null; }
     if (cmd === "vpn_files") return pick.files ?? files;

@@ -1,5 +1,6 @@
 // Screenshots of every UI scenario from the dev preview mock (src/dev/preview-mock.ts).
 // Needs `npm run dev` running. Usage: node scripts/ui-shots.mjs [outDir] [light|dark] [width] [height] [scenario,...]
+// Lab scenarios open in Lab mode; `programs-*` scenarios are Bug bounty's Programs screen (FE-2).
 import { chromium } from "playwright";
 
 const out = process.argv[2] ?? "ui-shots";
@@ -7,17 +8,45 @@ const scheme = process.argv[3] ?? "light";
 const width = Number(process.argv[4] ?? 900);
 const height = Number(process.argv[5] ?? 620);
 const only = process.argv[6]?.split(",");
-const all = ["connected", "no-target", "connecting", "reconnecting", "vpn-error", "blocked",
+const lab = ["connected", "no-target", "connecting", "reconnecting", "vpn-error", "blocked",
   "disconnected", "no-files", "stale", "docker-off"];
-const scenarios = only ?? all;
+
+// Programs: [mock ?p= state, what to do after it loads, what to wait for]
+const programs = {
+  "programs-loaded": ["loaded", null, "synced"],
+  "programs-loading": ["loading", null, null],
+  "programs-refreshing": ["refreshing", null, "refreshing"],
+  "programs-error": ["error", null, "error"],
+  "programs-changes": ["changes", async (p) => { await p.keyboard.press("c"); await p.keyboard.press("j"); await p.keyboard.press("j"); }, "synced"],
+  "programs-filter": ["loaded", async (p) => { await p.keyboard.press("/"); await p.keyboard.type("financial"); }, "synced"],
+  "programs-excluded": ["loaded", async (p) => { await p.keyboard.press("x"); await p.keyboard.press("G"); }, "synced"],
+  "programs-mixed": ["loaded", async (p) => { await p.keyboard.press("J"); }, "synced"],
+  "programs-empty": ["empty", null, "refreshing"],
+  "programs-empty-error": ["empty-error", null, "error"],
+};
+const scenarios = only ?? [...lab, ...Object.keys(programs)];
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: scheme });
 for (const s of scenarios) {
-  await page.goto(`http://localhost:1420/?s=${s}`);
-  await page.waitForFunction(() => document.getElementById("title")?.textContent !== "Checking the lab…");
+  const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, colorScheme: scheme });
+  const page = await ctx.newPage();
+  const p = programs[s];
+  // The app remembers the last mode; lab shots start in Lab mode.
+  await page.addInitScript((mode) => { try { localStorage.setItem("kali-lab.mode", mode); } catch {} }, p ? "bounty" : "lab");
+  if (p) {
+    const [state, act, wait] = p;
+    await page.goto(`http://localhost:1420/?p=${state}`);
+    if (wait === "synced") await page.waitForFunction(() => /^Synced just now/.test(document.getElementById("pg-status")?.textContent ?? ""));
+    if (wait === "refreshing") await page.waitForFunction(() => /Refreshing 12\//.test(document.getElementById("pg-status")?.textContent ?? ""));
+    if (wait === "error") await page.waitForFunction(() => !document.getElementById("pg-error")?.hidden);
+    if (act) await act(page);
+  } else {
+    await page.goto(`http://localhost:1420/?s=${s}`);
+    await page.waitForFunction(() => document.getElementById("title")?.textContent !== "Checking the lab…");
+  }
   await page.waitForTimeout(300);
   await page.screenshot({ path: `${out}/${scheme}-${width}-${s}.png` });
+  await ctx.close();
 }
 await browser.close();
 console.log(`${scenarios.length} screenshots -> ${out}/`);

@@ -404,6 +404,8 @@ body[data-mode="bounty"] { --cta: var(--mode-bounty); }
 .mode-name { font-weight: 700; }
 .mode-state { font-size: var(--s-small); color: #a9bac5; }
 .mode-state[data-state="running"] { color: #8fd9b5; }
+.mode-state[data-state="problem"] { color: #f4a3a6; }
+.mode-state:empty { display: none; }
 
 /* Launch screen: replaces the lab's tabs while the mode on screen isn't running. */
 #launch { display: none; }
@@ -412,10 +414,278 @@ body[data-view="launch"] .bar,
 body[data-view="launch"] #app-main { display: none; }
 body.popout .modes, body.popout #launch { display: none; }
 
-.confirm { margin-top: 4px; max-width: 56ch; }
-.confirm[hidden] { display: none; }
-.confirm p { margin: 0 0 12px; }
-.confirm-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
-.confirm .primary { min-width: 0; padding-inline: 18px; }
-.confirm-buttons button:not(.primary) { min-width: 120px; }
 #launch-action[hidden] { display: none; }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ---------- Bug bounty: Programs (FE-2). A dense, keyboard-first table on the Argo palette with
+   the mode's violet. The memorable thing is the Total column: a bar per program, relative to the
+   best one, solid when the ranking knows the program and hatched when it is estimated (join). ---------- */
+.programs { display: none; }
+body[data-view="bounty"] { height: 100vh; }
+body[data-view="bounty"] .bar,
+body[data-view="bounty"] #app-main,
+body[data-view="bounty"] #launch { display: none; }
+body[data-view="bounty"] .programs { display: flex; }
+body.popout .programs { display: none; }
+
+.programs {
+  --row: 30px;
+  flex: 1;
+  min-height: 0;
+  width: min(1480px, 100% - 2 * clamp(14px, 2.5vw, 40px));
+  padding-block: 14px 0;
+  flex-direction: column;
+  gap: 10px;
+  font-size: clamp(13px, 0.15vw + 11.5px, 15px);
+  line-height: 1.35;
+}
+.programs button { height: 32px; padding: 0 12px; font-weight: 400; border-color: var(--rule); border-radius: 6px; }
+.programs button:not(:disabled):hover { border-color: var(--ink); }
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0 4px;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--field);
+  color: var(--ink-soft);
+  font: 400 0.82em / 1.45 var(--mono);
+  text-align: center;
+}
+
+.pg-head { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.pg-head h1 { font-size: 1.6em; letter-spacing: -0.01em; }
+.pg-status {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+/* While refreshing: a short meter after the words, filled by progress. */
+.pg-status[data-state="running"] { color: var(--ink); }
+.pg-status[data-state="running"]::after {
+  content: "";
+  display: inline-block;
+  width: 72px;
+  height: 4px;
+  margin-left: 10px;
+  vertical-align: middle;
+  border-radius: 2px;
+  background:
+    linear-gradient(var(--cta), var(--cta)) 0 0 / calc(var(--p) * 100%) 100% no-repeat,
+    var(--hair);
+}
+.pg-refresh { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 8px; align-self: center; }
+.pg-refresh.spinning kbd { display: none; }
+.pg-error { margin: -4px 0 0; color: var(--stop); }
+.pg-error[hidden] { display: none; }
+
+.pg-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pg-filter { position: relative; flex: 0 1 340px; min-width: 180px; }
+.pg-filter input { height: 32px; padding: 0 34px 0 10px; border-radius: 6px; font-size: 1em; }
+.pg-filter input::-webkit-search-cancel-button { display: none; }
+.pg-filter kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); pointer-events: none; }
+.pg-filter:focus-within kbd { display: none; }
+.pg-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); }
+.pg-toggle[hidden] { display: none; }
+.pg-toggle[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+/* New since the last sync: the one toggle tinted with the mode colour, so it's noticed. */
+#pg-changes { color: var(--cta); border-color: var(--cta); background: color-mix(in srgb, var(--cta) 8%, var(--field)); font-weight: 700; }
+#pg-changes[aria-expanded="true"] { background: var(--cta); color: var(--cta-text); }
+#pg-changes[aria-expanded="true"] kbd { background: transparent; color: inherit; border-color: currentColor; }
+
+.pg-changes { border: 1px solid var(--hair); border-radius: 8px; background: var(--field); flex: none; }
+.pg-changes[hidden] { display: none; }
+.pg-changes-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 6px 6px 12px; border-bottom: 1px solid var(--hair); }
+.pg-changes-head p { margin: 0; color: var(--ink-soft); }
+.pg-changes-head button { height: 28px; }
+.pg-changes ul { list-style: none; margin: 0; padding: 4px 0; max-height: 26vh; overflow: auto; }
+.pg-changes li button {
+  width: 100%;
+  height: auto;
+  min-height: 28px;
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 16em) minmax(0, 1fr);
+  gap: 16px;
+  text-align: left;
+  background: none;
+}
+.pg-changes li button:hover { background: var(--paper); }
+.pg-changes .who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-changes .what { color: var(--ink-soft); overflow-wrap: anywhere; }
+.pg-changes .kind-scope-added, .pg-changes .kind-program-new { color: var(--go); }
+.pg-changes .kind-scope-removed { color: var(--stop); }
+
+/* The table: a white sheet that scrolls under a sticky header. */
+.pg-table-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  background: var(--field);
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  outline: none;
+  scroll-padding-top: 34px; /* a selected row never hides under the sticky header */
+}
+.pg-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.pg-table[hidden] { display: none; }
+.pg-table th, .pg-table td {
+  height: var(--row);
+  padding: 0 8px;
+  border-bottom: 1px solid var(--hair);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.pg-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 32px;
+  background: var(--field);
+  border-bottom-color: var(--rule);
+  font-weight: 400;
+}
+.pg-table thead button {
+  height: 100%;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: 0.92em;
+  text-align: inherit;
+  white-space: nowrap;
+}
+.pg-table thead button:hover { color: var(--ink); }
+.pg-table th[aria-sort="ascending"] button, .pg-table th[aria-sort="descending"] button { color: var(--ink); font-weight: 700; }
+.pg-table th[aria-sort="ascending"] button::after { content: " ↑"; color: var(--cta); }
+.pg-table th[aria-sort="descending"] button::after { content: " ↓"; color: var(--cta); }
+.pg-table th[data-col="rank"][aria-sort="ascending"] button::after { content: ""; } /* the default order needs no arrow */
+.pg-table .num { text-align: right; font-family: var(--mono); font-size: 0.95em; font-variant-numeric: tabular-nums; }
+.pg-table thead .num { font-family: var(--sans); }
+
+/* Column widths (minimums; the table is auto-layout so hidden columns give their space back). */
+.pg-table [data-col="rank"] { width: 44px; }
+.pg-table [data-col="total"] { width: 140px; }
+.pg-table [data-col="payout"], .pg-table [data-col="findability"],
+.pg-table [data-col="competition"], .pg-table [data-col="friction"] { width: 52px; }
+.pg-table [data-col="max"] { width: 60px; }
+.pg-table [data-col="surface"] { width: 52px; }
+.pg-table [data-col="scope"] { width: 58px; }
+.pg-table [data-col="conf"] { width: 58px; }
+.pg-table [data-col="flags"] { width: 104px; }
+.pg-table [data-col="link"] { width: 38px; }
+
+.pg-table tbody tr { cursor: default; }
+.pg-table tbody tr:not(.pg-group):hover { background: var(--paper); }
+.pg-table tbody tr.selected { background: color-mix(in srgb, var(--cta) 10%, var(--field)); }
+.pg-table tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--cta); }
+.pg-table .rank { color: var(--ink-soft); }
+.pg-table tr.changed .rank { color: var(--cta); font-weight: 700; }
+
+.pg-table .name { color: var(--ink); width: 100%; max-width: 0; } /* takes the free width, ellipsis when short */
+.pg-name { color: inherit; text-decoration: none; font-weight: 700; }
+.pg-name:hover { color: var(--cta); text-decoration: underline; text-underline-offset: 2px; }
+.handle { margin-left: 8px; color: var(--ink-soft); font-family: var(--mono); font-size: 0.85em; }
+.pg-tag {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--cta) 12%, var(--field));
+  color: var(--cta);
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
+.total .tbar {
+  display: inline-block;
+  width: 56px;
+  height: 8px;
+  margin-right: 8px;
+  vertical-align: 1px;
+  border-radius: 2px;
+  background:
+    linear-gradient(var(--cta), var(--cta)) 0 0 / calc(var(--w) * 100%) 100% no-repeat,
+    var(--hair);
+}
+/* Estimated (join): the same length, hatched, because findability and friction are assumed. */
+tr.join .total .tbar {
+  background:
+    repeating-linear-gradient(135deg, var(--cta) 0 2px, transparent 2px 4px) 0 0 / calc(var(--w) * 100%) 100% no-repeat,
+    var(--hair);
+}
+.total .v { display: inline-block; min-width: 2.6em; }
+.total .reason { font-family: var(--sans); font-size: 0.92em; color: var(--ink-soft); }
+.pg-table td.f { color: var(--ink); }
+.pg-table td.assumed { color: var(--ink-soft); text-decoration: underline dotted; text-underline-offset: 3px; }
+.pg-table tr.excluded td { color: var(--ink-soft); }
+.pg-table tr.excluded .pg-name { font-weight: 400; }
+.conf { color: var(--ink-soft); }
+
+.flag {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 5px;
+  border: 1px solid var(--hair);
+  border-radius: 4px;
+  color: var(--ink-soft);
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+.flag-join { color: var(--cta); border-color: color-mix(in srgb, var(--cta) 40%, var(--field)); }
+.flag-no-auto { color: var(--stop); border-color: color-mix(in srgb, var(--stop) 40%, var(--field)); }
+
+.pg-table td.link { padding: 0 4px; text-align: center; }
+.pg-open { display: inline-grid; place-items: center; width: 28px; height: 24px !important; padding: 0 !important; border: 0; color: var(--ink-soft); background: none; }
+.pg-open:hover { color: var(--cta); background: var(--paper); }
+
+.pg-group th {
+  height: auto;
+  padding: 16px 8px 6px;
+  color: var(--ink-soft);
+  font-weight: 400;
+  background: var(--field);
+  white-space: normal;
+}
+
+.pg-empty { padding: 48px 24px; max-width: 60ch; color: var(--ink-soft); font-size: 1.07em; }
+.pg-empty[hidden] { display: none; }
+
+.pg-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px 24px;
+  flex-wrap: wrap;
+  padding: 2px 0 10px;
+  color: var(--ink-soft);
+  font-size: 0.9em;
+}
+.pg-foot p { margin: 0; }
+.pg-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.pg-keys kbd + kbd { margin-left: 2px; }
+.pg-note { opacity: 0.85; }
+
+@media (max-width: 1100px) {
+  .pg-table .wide { display: none; }
+}
+@media (max-width: 640px) {
+  .pg-table .f, .pg-table [data-col="conf"], .pg-table .conf { display: none; }
+  .pg-head { flex-wrap: wrap; }
+  .handle { display: none; }
+}
