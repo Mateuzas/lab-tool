@@ -1,0 +1,28 @@
+#!/bin/sh
+# Starts the scope guard: mitmdump + guard_addon.py as uid guard (ADR 005, CONTRACTS §3.3).
+# Started and restarted by bounty-supervisor; run as root, drops to guard before exec.
+#   0.0.0.0:8080   human traffic (Burp on the Mac via the published 127.0.0.1:8081, the terminal)
+#   127.0.0.1:8082 bounty-run --actor claude: every request on this port is logged as claude
+# Upstream TLS verification stays on (ssl_insecure=false). connection_strategy=lazy and
+# upstream_cert=false: nothing is sent upstream before the addon has decided on a request.
+set -eu
+RUN=${BOUNTY_RUN_DIR:-/dev/shm/bounty-guard-run}
+SHARE=${BOUNTY_SHARE:-/usr/local/share/bounty}
+[ "$(id -u)" = 0 ] || { echo "bounty-guard: run as root (it drops to uid guard)"; exit 1; }
+[ -s "$RUN/conf/mitmproxy-ca.pem" ] || { echo "bounty-guard: no CA in $RUN/conf"; exit 1; }
+
+exec setpriv --reuid=guard --regid=guard --clear-groups --no-new-privs --inh-caps=-all --bounding-set=-all -- \
+  env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME="$RUN" LANG=C.UTF-8 PYTHONDONTWRITEBYTECODE=1 \
+  BOUNTY_RUN_DIR="$RUN" BOUNTY_CLAUDE_PORT=8082 \
+  mitmdump --quiet \
+    --mode regular@8080 --mode regular@127.0.0.1:8082 \
+    --set confdir="$RUN/conf" \
+    --set connection_strategy=lazy \
+    --set upstream_cert=false \
+    --set ssl_insecure=false \
+    --set rawtcp=false \
+    --set http3=false \
+    --set block_global=true \
+    --set flow_detail=0 \
+    --set termlog_verbosity=warn \
+    -s "$SHARE/guard_addon.py"

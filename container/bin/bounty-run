@@ -1,0 +1,159 @@
+#!/usr/bin/python3 -I
+"""bounty-run --actor <human|claude> -- <cmd...>   (CONTRACTS §6; run as root via docker exec)
+
+Runs <cmd> as uid hunter with the guard as proxy, so its traffic is checked, rate limited,
+identified and logged with the right actor (CONTRACTS §5):
+
+  actor            proxy (HTTP_PROXY, HTTPS_PROXY, ALL_PROXY + lower case)   flow-log actor
+  human, any cmd   http://127.0.0.1:8080                                       human
+  human, tool T    http://127.0.0.1:8080 + header X-Bounty-Actor: tool:T       tool:T
+  claude           http://127.0.0.1:8082 (the guard labels this port claude)  claude
+
+Tools in /usr/local/share/bounty/active-tools that take a header or proxy flag get them added
+right after the program name, because some ignore the proxy environment:
+  curl -H ...;  httpx-toolkit -H ... -http-proxy URL;  katana -H ... -proxy URL;
+  ffuf -H ... -x URL;  nuclei -H ... -proxy URL
+A tool that ignores both just fails: iptables lets only the guard connect out.
+
+With --actor claude, active tools are refused (exit 6) when the program forbids automation
+(rate_limit_rps 0 or automation forbidden), and every command is refused when ai_use is forbidden.
+Exit: the command's own code; 6 refused; 64 usage.
+"""
+
+import os
+import sys
+
+SHARE = os.environ.get("BOUNTY_SHARE", "/usr/local/share/bounty")
+sys.path.insert(0, SHARE)
+import guard_policy as gp  # noqa: E402
+
+SNAPSHOT = "/dev/shm/bounty-guard/policy.json"
+PORTS = {"human": 8080, "claude": 8082}
+HUNTER_HOME = "/home/hunter"
+
+# argv0 -> (header flag, proxy flag or None)
+TOOL_FLAGS = {
+    "curl": ("-H", None),
+    "httpx-toolkit": ("-H", "-http-proxy"),
+    "httpx": ("-H", "-http-proxy"),
+    "katana": ("-H", "-proxy"),
+    "ffuf": ("-H", "-x"),
+    "nuclei": ("-H", "-proxy"),
+}
+
+
+def usage(msg):
+    sys.stderr.write("bounty-run: usage: %s\nusage: bounty-run --actor <human|claude> -- <cmd...>\n" % msg)
+    sys.exit(64)
+
+
+def refuse(msg):
+    sys.stderr.write("bounty-run: automation-forbidden: %s\n" % msg)
+    sys.exit(6)
+
+
+def active_tools():
+    names = set()
+    try:
+        with open(os.path.join(SHARE, "active-tools")) as f:
+            for line in f:
+                line = line.split("#", 1)[0].strip()
+                if line:
+                    names.add(line)
+    except OSError:
+        pass
+    return names
+
+
+def program_rules():
+    """(automation_allowed, ai_forbidden) of the profile the guard enforces; (True, False) if none
+    (with no profile the guard refuses everything anyway)."""
+    import json
+    try:
+        with open(SNAPSHOT) as f:
+            snap = json.load(f)
+    except (OSError, ValueError):
+        return True, False
+    rules = (snap.get("profile") or {}).get("rules") or {}
+    rps = rules.get("rate_limit_rps")
+    automation = not (rps == 0 or rules.get("automation") == "forbidden")
+    return automation, rules.get("ai_use") == "forbidden"
+
+
+def parse(argv):
+    actor = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            return actor, argv[i + 1:]
+        if a == "--actor" and i + 1 < len(argv):
+            actor = argv[i + 1]
+            i += 2
+            continue
+        if a.startswith("--actor="):
+            actor = a.split("=", 1)[1]
+            i += 1
+            continue
+        usage("unexpected argument %r" % a)
+    usage("missing -- before the command")
+
+
+def main():
+    if os.geteuid() != 0:
+        sys.stderr.write("bounty-run: run as root via docker exec (it drops to hunter)\n")
+        return 1
+    actor, cmd = parse(sys.argv[1:])
+    if actor not in PORTS:
+        usage("--actor must be human or claude")
+    if not cmd:
+        usage("no command")
+    name = os.path.basename(cmd[0])
+    tools = active_tools()
+    is_tool = name in tools
+    automation, ai_forbidden = program_rules()
+    if actor == "claude":
+        if ai_forbidden:
+            refuse("the program forbids AI use: Claude may read, suggest and draft, not run commands")
+        if is_tool and not automation:
+            refuse("the program forbids automated tools; %s is on the active-tools list" % name)
+        label = "claude"
+    else:
+        label = "tool:" + name if is_tool else "human"
+    if not gp.ACTOR_RE.match(label):
+        label = "tool:unknown"
+    proxy = "http://127.0.0.1:%d" % PORTS[actor]
+
+    args = list(cmd)
+    flags = TOOL_FLAGS.get(name)
+    if flags:
+        extra = []
+        if label != "human":
+            extra += [flags[0], "%s: %s" % (gp.ACTOR_HEADER, label)]
+        if flags[1]:
+            extra += [flags[1], proxy]
+        args = [args[0]] + extra + args[1:]
+
+    env = {
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "HOME": HUNTER_HOME, "USER": "hunter", "LOGNAME": "hunter", "SHELL": "/bin/bash",
+        "LANG": os.environ.get("LANG", "C.UTF-8"), "TERM": os.environ.get("TERM", "dumb"),
+        "BOUNTY_ACTOR": label,
+    }
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        env[k] = proxy
+    cwd = os.getcwd()
+    if not (cwd == "/bounty" or cwd.startswith("/bounty/") or cwd.startswith(HUNTER_HOME)):
+        cwd = HUNTER_HOME
+    os.chdir(cwd)
+    setpriv = ["setpriv", "--reuid=hunter", "--regid=hunter", "--init-groups", "--no-new-privs",
+               "--inh-caps=-all", "--bounding-set=-all", "--"]
+    try:
+        os.execvpe("setpriv", setpriv + args, env)
+    except OSError as e:
+        sys.stderr.write("bounty-run: cannot run %s: %s\n" % (name, e))
+        return 127
+
+
+if __name__ == "__main__":
+    sys.exit(main())

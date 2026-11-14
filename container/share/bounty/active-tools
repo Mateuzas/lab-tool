@@ -1,0 +1,29 @@
+# Commands bounty-run treats as automated tools (CONTRACTS §6). One name per line.
+# With --actor claude and a program that forbids automation they are refused (exit 6);
+# with --actor human they are logged as tool:<name> and the guard refuses them when the
+# program's rate_limit_rps is 0 (automation-forbidden).
+httpx-toolkit
+httpx
+katana
+ffuf
+nuclei
+dnsx
+gobuster
+feroxbuster
+dirb
+dirsearch
+wfuzz
+nikto
+sqlmap
+wpscan
+hydra
+nmap
+masscan
+gospider
+hakrawler
+arjun
+dalfox
+commix
+whatweb
+testssl.sh
+sslscan
