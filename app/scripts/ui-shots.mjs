@@ -23,6 +23,9 @@ const programs = {
   "programs-mixed": ["loaded", async (p) => { await p.keyboard.press("J"); }, "synced"],
   "programs-empty": ["empty", null, "refreshing"],
   "programs-empty-error": ["empty-error", null, "error"],
+  // Background sync (FE-5): 5th element = extra query
+  "programs-next-sync": ["loaded", null, "synced", null, ""],
+  "programs-bg-sync": ["loaded", async (p) => { await p.waitForFunction(() => !document.getElementById("pg-changes")?.hidden, null, { timeout: 8000 }); await p.waitForTimeout(200); await p.keyboard.press("c"); }, "synced", null, "&sync=1"],
   // Scope guard (FE-4): 4th element is the mock ?g= state
   "guard-off": ["loaded", null, "synced", "off"],
   "guard-starting": ["loaded", null, "synced", "starting"],
@@ -42,9 +45,9 @@ for (const s of scenarios) {
   // The app remembers the last mode; lab shots start in Lab mode.
   await page.addInitScript((mode) => { try { localStorage.setItem("kali-lab.mode", mode); } catch {} }, p ? "bounty" : "lab");
   if (p) {
-    const [state, act, wait, g] = p;
-    await page.goto(`http://localhost:1420/?p=${state}${g ? `&g=${g}` : ""}`);
-    if (wait === "synced") await page.waitForFunction(() => /^Synced just now/.test(document.getElementById("pg-status")?.textContent ?? ""));
+    const [state, act, wait, g, extra] = p;
+    await page.goto(`http://localhost:1420/?p=${state}${g ? `&g=${g}` : ""}${extra ?? ""}`);
+    if (wait === "synced") await page.waitForFunction(() => /^Synced just now/.test(document.getElementById("pg-status")?.title ?? ""));
     if (wait === "refreshing") await page.waitForFunction(() => /Refreshing 12\//.test(document.getElementById("pg-status")?.textContent ?? ""));
     if (wait === "error") await page.waitForFunction(() => !document.getElementById("pg-error")?.hidden);
     if (act) await act(page);
