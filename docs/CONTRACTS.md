@@ -22,12 +22,28 @@ workspace/
       program.json                 normalised profile (§2)
       history.jsonl                one line per change found by `programs changes` (§6)
       notes.md                     free text, the user's
-      recon/                       tool output, one file per run: <tool>-<UTC timestamp>.<ext>
-      flows/<UTC date>.jsonl       guard flow log (§5)
-      flows/<UTC date>.mitm        full mitmproxy flows for evidence
       findings/<id>/finding.md     a finding (§7), with evidence files beside it
       time.jsonl                   hours spent: {"start","end","note"} (feeds ranking feedback)
+    work/<handle>/               the ONLY folder kali-bounty can write to (tool output, scratch)
+      recon/                       one file per run: <tool>-<UTC timestamp>.<ext>
 ```
+
+Inside `kali-bounty` the workspace is **read-only** (`/bounty:ro`), except `work/` (`/bounty/work:rw`).
+Docker Desktop ignores Unix permissions on bind mounts, so a writable `/bounty` would let any tool
+(or Claude) edit a profile and widen the scope. Guard state and evidence live in the Docker volume
+`kali-bounty-guard` at `/var/lib/bounty-guard/` (permissions enforced: root:guard, 0750):
+
+```
+/var/lib/bounty-guard/
+  guard.json                     status, program, rate, versions, restarts, egress_ip, last refusals, reloads
+  guard-events.log               reloads, restarts, firewall re-locks
+  ca/                            the guard's CA; the key is readable only by uid guard
+  flows/<handle>/<YYYYMMDD>.jsonl  flow log (§5), and .mitm full flows for evidence
+```
+
+The Mac reads it with `docker exec` (`host/bounty guard status`, `host/bounty flows`) and copies
+evidence out with `host/bounty flows export <handle> <dir>`. The volume survives `guard stop`;
+`guard stop --purge` removes it.
 
 `<handle>` is the platform handle, lower case, `[a-z0-9-]`, prefixed with the platform:
 `intigriti-<api handle>`. When API handles collide (several programs are called `vdp`) it is
@@ -123,12 +139,12 @@ Reason codes: `no-profile`, `host-mismatch`, `out-of-scope`, `not-in-scope`, `in
 ### 3.3 Ports and processes
 | What | Where |
 |---|---|
-| guard listen | `127.0.0.1:8080` in `kali-bounty`, published `127.0.0.1:8081` on the Mac |
+| guard listen | `0.0.0.0:8080` in `kali-bounty` (human traffic), published only as `127.0.0.1:8081` on the Mac; `127.0.0.1:8082` inside the container for `--actor claude` (not published) |
 | guard user | uid `guard` (only uid allowed new outbound connections) |
 | tool user (human) | uid `hunter`; env `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` = `http://127.0.0.1:8080` |
-| guard CA | generated per container at first start in `/bounty/.guard-ca/` (tmpfs copy for mitmdump); installed in the container's trust store; Burp is told not to validate the upstream |
+| guard CA | generated at first start in `/var/lib/bounty-guard/ca/`; only the certificate goes into the container's trust store; Burp is told not to validate the upstream |
 | control | `docker exec kali-bounty bounty-ctl reload` re-reads `/bounty/active` and the profile |
-| container | `docker run -d --name kali-bounty --init --restart unless-stopped --cap-add=NET_ADMIN -p 127.0.0.1:8081:8080 -v $BOUNTY_WORKSPACE:/bounty kali-lab:dev bounty-supervisor` (no `/dev/net/tun`, no VPN, no other mount); started by `host/bounty guard start`, stopped by `guard stop`; starting it stops `kali-lab` and vice versa (one mode at a time) |
+| container | `docker run -d --name kali-bounty --init --restart unless-stopped --cap-add=NET_ADMIN -p 127.0.0.1:8081:8080 -v $BOUNTY_WORKSPACE:/bounty:ro -v $BOUNTY_WORKSPACE/work:/bounty/work:rw -v kali-bounty-guard:/var/lib/bounty-guard kali-lab:dev bounty-supervisor` (no `/dev/net/tun`, no VPN, no other mount); started by `host/bounty guard start`, stopped by `guard stop`; starting it stops `kali-lab` and vice versa (one mode at a time) |
 | users | `guard` uid 990 (system, no shell), `hunter` uid 1000 (home `/home/hunter`); both created in the image |
 
 ### 3.4 `recon-sources.json`
@@ -197,7 +213,10 @@ looked up once per guard start via a `recon-source` and logged on every line.
 | `programs changes [--since TS]` | diff of the last two syncs, appended to each `history.jsonl` | 0, 1 if nothing changed |
 | `program use H` | write `active`, `docker exec … bounty-ctl reload` | 0, 5 if the container is not running |
 | `program show [H]` | profile, scope, rules, legal basis | 0 |
-| `guard status` | active program, rate limit, last refusals | 0 |
+| `guard start` / `guard stop [--purge]` | start `kali-bounty` (stops `kali-lab`) / remove it (`--purge` also the guard volume) | 0, 5 Docker not running |
+| `guard status [--json]` | `guard.json` via docker exec | 0, 5 |
+| `flows [--handle H] [--tail N] [--json]` | the flow log via docker exec | 0, 5 |
+| `flows export <handle> <dir>` | copy that program's flows (jsonl + mitm) to a Mac folder for report evidence | 0, 5 |
 | `time start|stop [note]` | append to `time.jsonl` | 0 |
 
 Errors go to stderr as one line `bounty: <code>: <message>`, never containing a token. Usage errors
@@ -206,7 +225,7 @@ sync still exits 0.
 `history.jsonl` line: `{"ts","kind":"program-new|scope-added|scope-removed|bounty-changed|rules-changed","detail":{…,"from_sync","to_sync"}}`.
 Scope entries are compared by (type, value, tier), in and out, only when both snapshots have scope.
 
-Inside the container: `bounty-run --actor <human|claude> -- <cmd…>` runs a command as uid `hunter`
+Inside the container: `bounty-run --actor <human|claude> -- <cmd…>` runs a command as uid `hunter` in `/bounty/work/<active handle>`
 with the proxy env and `X-Bounty-Actor` set (curl/httpx/katana/ffuf/nuclei get it through their
 header flags or `HTTP_PROXY` with a per-actor guard port if a tool can't add headers; Backender
 decides, documents it in the PR). With `--actor claude` and `automation: forbidden`, active tools
