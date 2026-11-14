@@ -72,7 +72,9 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 
 | Id | Owner | Task | Status |
 |---|---|---|---|
-| BE-17 | Backender | Background sync every 15–30 min while the app runs (incremental, ≤ 1 req/s) + macOS notification for new programs and new in-scope assets on ranked/followed programs | todo (next) |
+| BE-17 | Backender | Background sync every 20 min + macOS notifications + `access-granted`/`access-lost` change kinds (CONTRACTS §9.2) | in progress |
+| FE-5 | Frontender | Status line "Next sync 14:20", reload on `bounty-synced`, recent alerts in the changes panel (CONTRACTS §9.2) | in progress |
+| BE-21 | Backender | Private programs: list of programs that need joining with their list-field rank, application state you mark by hand (applied / accepted / rejected), `access-granted` closes the loop | todo |
 | BE-18 | Backender | Fresh-asset mapping: on a new in-scope asset, passive recon + httpx/katana through the guard within the program's rate, results in `work/<handle>/recon/` as a "look here" list | todo |
 | BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | todo |
 | BE-7 | Backender | `hunter/` Claude copilot (see slice 2) | todo |

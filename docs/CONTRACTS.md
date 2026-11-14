@@ -320,3 +320,32 @@ different active program); the header shows the guard: `Guard · Dropbox · 5 re
 (or `Guard off`), polling `bounty_guard_status()` every 5 s while Bug bounty mode is visible; the
 active program's row is marked; `b` opens Burp through the guard; `g` stops the guard. Lab mode's
 start button keeps working and the bounty header then shows `Guard off`.
+
+### 9.2 Background sync and alerts (BE-17, FE-5)
+
+While the app runs, Rust repeats `bounty_refresh` every **20 min** (±2 min jitter; skipped if a
+refresh is already running; first run 20 min after the start-up refresh). Each finished refresh
+emits the app event `bounty-synced` with the same `ChangeEvent[]` as `done`, so the Programs screen
+reloads the ranking without a key press.
+
+New `ChangeEvent.kind`s from `programs changes` (BE-17, Python):
+- `access-granted`: a program's detail went from `needs-join` to `ok` (you were accepted).
+- `access-lost`: from `ok` to `needs-join`.
+
+**Notifications** (macOS, via `/usr/bin/osascript -e 'display notification …'`, no plugin; title
+"Lab Tool", text ≤ 120 chars, program names escaped for AppleScript) for, per sync, at most 3
+(the rest summarised as "+N more changes"):
+
+| Event | When | Text |
+|---|---|---|
+| `access-granted` | always | `Access granted: <name> — scope is in the app` |
+| `program-new` | `max_eur > 0` | `New program: <name> · max <€> · <pub/reg/app>` |
+| `scope-added` | program is the guard's active one, `following` on Intigriti, or in the ranked top 25 | `<name>: new scope <value> (<tier>)` |
+| `bounty-changed` | max went up | `<name>: bounty up to <€>` |
+| `rules-changed` | program is the guard's active one | `<name>: rules changed — re-read before testing` |
+
+No notification when the app is not running (a launchd job is a later task). Notifications never
+contain tokens or anything from the guard's flows.
+
+`bounty_alert_state()` → `{ next_sync_at: string | null, last_sync_at: string | null, last_alerts: {ts: string; text: string}[] }`
+for the status line ("Next sync 14:20").
