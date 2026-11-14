@@ -349,3 +349,57 @@ contain tokens or anything from the guard's flows.
 
 `bounty_alert_state()` → `{ next_sync_at: string | null, last_sync_at: string | null, last_alerts: {ts: string; text: string}[] }`
 for the status line ("Next sync 14:20").
+
+## 10. Recon: "look here" list (BE-18, FE-6)
+
+User decision 2026-11-15: **passive recon runs automatically; anything that sends traffic to a
+program's own hosts runs only when the user presses a key, and only for the guard's active program.**
+
+### 10.1 Passive (automatic, Mac side, no traffic to the program)
+`host/bounty recon passive <handle> [--domain D]` (stdlib Python): for each in-scope `wildcard`
+(or `--domain`), query certificate transparency (`https://crt.sh/?q=%25.<domain>&output=json`,
+≤ 1 request / 5 s, 60 s timeout, retry once) and resolve each name once with the Mac's resolver.
+Names are classified with the guard's own matcher (`container/share/bounty/guard_policy.py`, imported
+by path, not copied): `in-scope` | `out-of-scope` | `not-in-scope`. Writes/merges
+`work/<handle>/recon/hosts.jsonl` (one line per name, updated in place):
+`{"host","sources":["crt.sh"],"first_seen","last_seen","scope":"in-scope|…","resolves":bool,"ips":[…]}`.
+Exit 0; 3 if crt.sh failed (partial results kept).
+Triggered automatically by the app after a sync for every `scope-added` wildcard on the active,
+followed or top-25 programs (same rule as notifications), and on `program use` if `hosts.jsonl` is
+missing. Never for out-of-scope entries.
+
+### 10.2 Active mapping (on key, active program only, through the guard)
+`host/bounty recon map [--limit N]` → `docker exec kali-bounty bounty-run --actor human -- bounty-map`
+for the **active** program (exit 5 if the guard isn't active). `bounty-map` (container, runs as
+hunter in `/bounty/work/<handle>`): `httpx-toolkit` on in-scope resolving hosts from `hosts.jsonl`
+(status, title, tech, content length, final URL; `-rl` = the program's rps), then `katana` depth 2,
+max 300 URLs per live host, JS crawling on, same rate. Outputs `recon/live.jsonl`
+(`{"host","url","status","title","tech":[],"length","final_url","ts"}`) and
+`recon/urls.jsonl` (`{"host","url","method","source","ts"}`). Progress lines on stderr:
+`bounty: progress: <done>/<total> <host>`. All traffic is in the guard's flow log as `tool:httpx-toolkit`
+/ `tool:katana`.
+
+### 10.3 The list
+`host/bounty recon list <handle> [--json]` merges hosts, live and urls into one row per host, sorted
+by `interest` (0..1) then `first_seen` desc:
+`{"host","scope","new":bool (first_seen < 7 days),"live":bool|null,"status","title","tech","urls":int,
+"signals":["login","api","admin","upload","graphql","swagger","debug","js-heavy","redirect-offsite"],"interest"}`.
+`interest` = new 0.35 + live 0.15 + 0.1 per signal (cap 1). Signals come from paths/titles/tech by
+simple keyword rules in one table in the code (documented in the PR).
+
+### 10.4 App
+| Command | Runs | Returns |
+|---|---|---|
+| `bounty_recon_list(handle)` | `recon list <h> --json` | `ReconRow[]` (the §10.3 object) |
+| `bounty_recon_map(on_event: Channel<SyncEvent>)` | `recon map` | `()` after done/error; one at a time |
+| (automatic) | Rust runs `recon passive <h>` after a sync per §10.1, sequentially, ≤ 3 programs per sync | emits `bounty-recon-updated` `{handle}` |
+
+FE-6: on the Programs screen `l` opens the **look-here** panel for the selected program (rows of
+§10.3, keyboard: j/k, Enter/o opens the host in the default browser — not through the guard, so it
+shows the URL and says "open in Burp's browser to test"; `m` maps the active program with progress).
+Hosts marked `new` are highlighted; out-of-scope ones are hidden behind a toggle.
+
+### 10.5 Change kind `program-closed`
+`programs changes` adds `program-closed` when `status` goes from open to suspended/closed (and
+`program-reopened` back). Notify (§9.2) when it's the guard's active or a followed program:
+`<name> is now suspended — stop testing`.
