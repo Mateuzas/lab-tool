@@ -4,14 +4,17 @@
 #    if the rules drift, the guard is killed at once and only restarted after the lock is back
 #  - starts the guard (bounty-guard: mitmdump + addon as uid guard) and restarts it if it dies
 #  - reloads the guard when the active program.json changes on disk (bounty-ctl autoreload)
-#  - writes /bounty/state/guard.json (bounty-ctl publish) for host/bounty and the app
+#  - writes /var/lib/bounty-guard/guard.json (bounty-ctl publish); the Mac reads it with docker exec
+# /bounty is mounted read-only (only /bounty/work is writable, for hunter's output). Guard state,
+# flows and the CA live in the kali-bounty-guard volume at /var/lib/bounty-guard.
 # The guard starts with no profile (refuses everything) until `host/bounty program use <handle>`.
 set -u
 
-STATE=/bounty/state
+STATE=/var/lib/bounty-guard
 EVENTS=$STATE/guard-events.log
 GUARD_LOG=/var/log/bounty-guard.log
 mkdir -p "$STATE"
+umask 027
 
 guard_pid=0; restarts=0; started=0; firewall=broken; last_publish=0; last_autoreload=0
 

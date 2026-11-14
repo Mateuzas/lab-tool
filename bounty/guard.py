@@ -4,20 +4,27 @@ The container is controlled only with `docker run/exec/rm` (never by editing sha
 Desktop can serve stale copies). INTIGRITI_USERNAME reaches the guard through `docker exec -e`
 (name only on the command line, value from this process's environment) and stays in tmpfs there.
 
+Mounts: the workspace read-only at /bounty (this Mac side is the only writer of profiles and
+`active`), <workspace>/work read-write at /bounty/work (hunter's output), and the Docker volume
+kali-bounty-guard at /var/lib/bounty-guard (guard state, flows, CA), read here only via docker exec.
+
 Environment (tests use them so they never touch the real containers):
   BOUNTY_CONTAINER (kali-bounty), BOUNTY_LAB_CONTAINER (kali-lab), BOUNTY_IMAGE (kali-lab:dev),
-  BOUNTY_GUARD_PORT (8081, the Mac port Burp uses as upstream proxy).
+  BOUNTY_GUARD_PORT (8081, the Mac port Burp uses as upstream proxy),
+  BOUNTY_GUARD_VOLUME (kali-bounty-guard).
 """
 
+import datetime
 import json
 import os
 import subprocess
 import sys
 import time
 
-from bounty.util import REPO_ROOT, BountyError, read_json
+from bounty.util import REPO_ROOT, BountyError, read_json, write_bytes
 
 USERNAME_ENV = "INTIGRITI_USERNAME"
+VAR = "/var/lib/bounty-guard"
 
 
 def _cfg():
@@ -28,7 +35,8 @@ def _cfg():
     return {"container": e.get("BOUNTY_CONTAINER") or "kali-bounty",
             "lab": e.get("BOUNTY_LAB_CONTAINER") or "kali-lab",
             "image": e.get("BOUNTY_IMAGE") or "kali-lab:dev",
-            "port": port}
+            "port": port,
+            "volume": e.get("BOUNTY_GUARD_VOLUME") or "kali-bounty-guard"}
 
 
 def _docker(args, check=False, capture=True, env=None, input_text=None):
@@ -55,7 +63,7 @@ def exists(name):
 
 
 def read_state(cfg):
-    code, out, _ = _docker(["exec", cfg["container"], "cat", "/bounty/state/guard.json"])
+    code, out, _ = _docker(["exec", cfg["container"], "cat", VAR + "/guard.json"])
     if code != 0:
         return None
     try:
@@ -65,9 +73,12 @@ def read_state(cfg):
 
 
 def run_args(cfg, ws):
-    """CONTRACTS §3.3, exactly (name, image and Mac port configurable for tests)."""
+    """CONTRACTS §3.3 (name, image, Mac port and volume configurable for tests). Only the guard's
+    8080 is published, on 127.0.0.1; the claude port 8082 stays inside the container."""
     return ["run", "-d", "--name", cfg["container"], "--init", "--restart", "unless-stopped",
-            "--cap-add=NET_ADMIN", "-p", "127.0.0.1:%s:8080" % cfg["port"], "-v", "%s:/bounty" % ws,
+            "--cap-add=NET_ADMIN", "-p", "127.0.0.1:%s:8080" % cfg["port"],
+            "-v", "%s:/bounty:ro" % ws, "-v", "%s:/bounty/work:rw" % os.path.join(ws, "work"),
+            "-v", "%s:%s" % (cfg["volume"], VAR),
             cfg["image"], "bounty-supervisor"]
 
 
@@ -76,7 +87,7 @@ def guard_start(ws, out=sys.stdout):
     if running(cfg["lab"]):
         _docker(["stop", cfg["lab"]], check=True)
         out.write("stopped %s: one mode at a time (Lab comes back with host/lab up)\n" % cfg["lab"])
-    os.makedirs(ws, exist_ok=True)
+    os.makedirs(os.path.join(ws, "work"), exist_ok=True)
     if exists(cfg["container"]):
         _docker(["start", cfg["container"]], check=True)
     else:
@@ -98,13 +109,80 @@ def guard_start(ws, out=sys.stdout):
     return 0
 
 
-def guard_stop(out=sys.stdout):
+def guard_stop(purge=False, yes=False, out=sys.stdout):
+    cfg = _cfg()
+    if purge and not yes:
+        raise BountyError("usage", "--purge deletes the volume %s: every flow log (report evidence) and the "
+                                   "guard CA. Export flows first (flows export), then add --yes" % cfg["volume"], 64)
+    if exists(cfg["container"]):
+        _docker(["rm", "-f", cfg["container"]], check=True)
+        out.write("removed %s (workspace kept)\n" % cfg["container"])
+    else:
+        out.write("%s is not there\n" % cfg["container"])
+    if purge:
+        if _docker(["volume", "inspect", cfg["volume"]])[0] == 0:
+            _docker(["volume", "rm", cfg["volume"]], check=True)
+            out.write("removed volume %s (flows and guard CA)\n" % cfg["volume"])
+    else:
+        out.write("flows and guard CA kept in volume %s\n" % cfg["volume"])
+    return 0
+
+
+def _flow_handle(cfg, handle):
+    gp = _policy_module()
+    if handle is None:
+        st = read_state(cfg) or {}
+        handle = st.get("program")
+        if not handle:
+            raise BountyError("usage", "no active program: pass --handle", 64)
+    h = handle.strip().lower()
+    if h != "_none" and not gp.HANDLE_RE.match(h):
+        raise BountyError("usage", "%r is not a program handle" % handle, 64)
+    return h
+
+
+def flows(handle=None, tail=50, as_json=False, out=sys.stdout):
+    """The guard's flow log of one program (CONTRACTS §5), read with docker exec."""
+    cfg = _cfg()
+    if not running(cfg["container"]):
+        raise BountyError("guard", "%s is not running (host/bounty guard start)" % cfg["container"], 5)
+    h = _flow_handle(cfg, handle)
+    if tail is not None and tail < 1:
+        raise BountyError("usage", "--tail must be >= 1", 64)
+    script = 'cat "$1"/*.jsonl 2>/dev/null' + (' | tail -n %d' % tail if tail else "")
+    code, text, err = _docker(["exec", cfg["container"], "sh", "-c", script, "sh", "%s/flows/%s" % (VAR, h)])
+    recs = []
+    for line in text.splitlines():
+        try:
+            recs.append(json.loads(line))
+        except ValueError:
+            continue
+    if as_json:
+        out.write(json.dumps(recs, indent=1, ensure_ascii=False) + "\n")
+        return 0
+    for r in recs:
+        out.write("%s %-12s %-8s %-20s %-6s %3s %s\n" % (
+            r.get("ts"), r.get("actor"), r.get("decision"), r.get("reason") or "-", r.get("method"),
+            r.get("status") if r.get("status") is not None else "-", r.get("url")))
+    if not recs:
+        out.write("no flows for %s\n" % h)
+    return 0
+
+
+def flows_export(handle, dest, out=sys.stdout):
+    """docker cp of one program's flows (jsonl + mitm) into <dest>/<handle>-flows-<UTC ts>/."""
     cfg = _cfg()
     if not exists(cfg["container"]):
-        out.write("%s is not there\n" % cfg["container"])
-        return 0
-    _docker(["rm", "-f", cfg["container"]], check=True)
-    out.write("removed %s (workspace kept)\n" % cfg["container"])
+        raise BountyError("guard", "%s does not exist (host/bounty guard start)" % cfg["container"], 5)
+    h = _flow_handle(cfg, handle)
+    dest = os.path.abspath(os.path.expanduser(dest))
+    os.makedirs(dest, exist_ok=True)
+    stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    target = os.path.join(dest, "%s-flows-%s" % (h, stamp))
+    code, _, err = _docker(["cp", "%s:%s/flows/%s" % (cfg["container"], VAR, h), target])
+    if code != 0:
+        raise BountyError("guard", "no flows for %s (%s)" % (h, err.strip()), 1)
+    out.write("exported flows of %s to %s\n" % (h, target))
     return 0
 
 
@@ -176,15 +254,13 @@ def program_use(ws, handle, out=sys.stdout):
     cfg = _cfg()
     if not running(cfg["container"]):
         raise BountyError("guard", "%s is not running (host/bounty guard start)" % cfg["container"], 5)
-    code, _, err = _docker(["exec", "-i", cfg["container"], "sh", "-c",
-                            "cat > /bounty/.active.tmp && mv /bounty/.active.tmp /bounty/active"],
-                           input_text=h + "\n")
-    if code != 0:
-        raise BountyError("guard", "could not write /bounty/active: %s" % err.strip(), 1)
+    # The Mac is the only writer of `active` (the container sees /bounty read-only); bounty-ctl
+    # waits until the shared folder shows the new value.
+    write_bytes(os.path.join(ws, "active"), (h + "\n").encode())
     args = ["exec"]
     if username:
         args += ["-e", USERNAME_ENV]   # value comes from our environment, not the command line
-    args += [cfg["container"], "bounty-ctl", "reload"]
+    args += [cfg["container"], "bounty-ctl", "reload", "--expect", h]
     code, o, e = _docker(args)
     for line in (o + e).splitlines():
         out.write(line.replace("bounty-ctl: ", "") + "\n")

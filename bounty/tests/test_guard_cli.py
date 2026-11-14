@@ -59,13 +59,23 @@ class ProgramUse(unittest.TestCase):
             self.assertEqual(self.code("acme", {"INTIGRITI_USERNAME": "tester"}), 5)
 
 
+class Purge(unittest.TestCase):
+    def test_purge_needs_yes(self):
+        with mock.patch.object(guard, "_docker", side_effect=AssertionError("must not run docker")):
+            with self.assertRaises(BountyError) as cm:
+                guard.guard_stop(purge=True, yes=False, out=io.StringIO())
+        self.assertEqual(cm.exception.exit_code, 64)
+
+
 class RunArgs(unittest.TestCase):
     def test_contract_flags(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             args = guard.run_args(guard._cfg(), "/ws")
         self.assertEqual(args, ["run", "-d", "--name", "kali-bounty", "--init", "--restart", "unless-stopped",
-                                "--cap-add=NET_ADMIN", "-p", "127.0.0.1:8081:8080", "-v", "/ws:/bounty",
+                                "--cap-add=NET_ADMIN", "-p", "127.0.0.1:8081:8080", "-v", "/ws:/bounty:ro",
+                                "-v", "/ws/work:/bounty/work:rw", "-v", "kali-bounty-guard:/var/lib/bounty-guard",
                                 "kali-lab:dev", "bounty-supervisor"])
+        self.assertEqual(sum(1 for a in args if a == "-p"), 1)   # only the human port, never 8082
         self.assertNotIn("--privileged", args)
 
 

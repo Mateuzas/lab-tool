@@ -80,6 +80,28 @@ def program_rules():
     return automation, rules.get("ai_use") == "forbidden"
 
 
+def work_dir():
+    """/bounty/work/<active handle> (the only writable bind mount), created for hunter."""
+    import json
+    handle = None
+    try:
+        with open(SNAPSHOT) as f:
+            handle = json.load(f).get("handle")
+    except (OSError, ValueError):
+        pass
+    base = "/bounty/work"
+    if not os.path.isdir(base):
+        return HUNTER_HOME
+    if not handle or not gp.HANDLE_RE.match(handle):
+        return base
+    path = os.path.join(base, handle)
+    for d in (path, os.path.join(path, "recon")):
+        if not os.path.isdir(d):
+            os.mkdir(d, 0o755)
+            os.chown(d, 1000, 1000)
+    return path
+
+
 def parse(argv):
     actor = None
     i = 0
@@ -142,10 +164,7 @@ def main():
     }
     for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env[k] = proxy
-    cwd = os.getcwd()
-    if not (cwd == "/bounty" or cwd.startswith("/bounty/") or cwd.startswith(HUNTER_HOME)):
-        cwd = HUNTER_HOME
-    os.chdir(cwd)
+    os.chdir(work_dir())
     setpriv = ["setpriv", "--reuid=hunter", "--regid=hunter", "--init-groups", "--no-new-privs",
                "--inh-caps=-all", "--bounding-set=-all", "--"]
     try:

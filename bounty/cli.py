@@ -52,9 +52,17 @@ def build_parser():
     g = sub.add_parser("guard", help="the scope guard container kali-bounty (CONTRACTS §3.3)")
     gs = g.add_subparsers(dest="cmd")
     gs.add_parser("start", help="start kali-bounty (stops kali-lab: one mode at a time)")
-    gs.add_parser("stop", help="remove kali-bounty (the workspace is kept)")
+    gsp = gs.add_parser("stop", help="remove kali-bounty (workspace and the flows volume are kept)")
+    gsp.add_argument("--purge", action="store_true", help="also delete the volume with flows and the guard CA")
+    gsp.add_argument("--yes", action="store_true", help="confirm --purge")
     gst = gs.add_parser("status", help="active program, rate limit, last refusals")
     gst.add_argument("--json", action="store_true")
+    fl = sub.add_parser("flows", help="the guard's flow log (CONTRACTS §5), read from the container")
+    fl.add_argument("action", nargs="?", choices=["export"], help="export <handle> <dir>: copy flows to a Mac folder")
+    fl.add_argument("args", nargs="*", metavar="ARG")
+    fl.add_argument("--handle", help="program (default: the active one)")
+    fl.add_argument("--tail", type=int, default=50, help="last N lines (default 50)")
+    fl.add_argument("--json", action="store_true")
     prog = sub.add_parser("program", help="one program")
     prs = prog.add_subparsers(dest="cmd")
     u = prs.add_parser("use", help="make a program the guard's active profile "
@@ -185,6 +193,16 @@ def cmd_changes(args, ws):
     return 0
 
 
+def cmd_flows(args, ws):
+    if args.action == "export":
+        if len(args.args) != 2:
+            raise BountyError("usage", "flows export <handle> <dir>", 64)
+        return guard_mod.flows_export(args.args[0], args.args[1])
+    if args.args:
+        raise BountyError("usage", "unexpected arguments %s" % " ".join(args.args), 64)
+    return guard_mod.flows(args.handle, args.tail, args.json)
+
+
 def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -193,7 +211,8 @@ def main(argv=None):
         ("programs", "sync"): cmd_sync, ("programs", "status"): cmd_status, ("programs", "list"): cmd_list,
         ("programs", "rank"): cmd_rank, ("programs", "changes"): cmd_changes,
         ("guard", "start"): lambda a, w: guard_mod.guard_start(w),
-        ("guard", "stop"): lambda a, w: guard_mod.guard_stop(),
+        ("guard", "stop"): lambda a, w: guard_mod.guard_stop(a.purge, a.yes),
+        ("flows", None): cmd_flows,
         ("guard", "status"): lambda a, w: guard_mod.guard_status(a.json),
         ("program", "use"): lambda a, w: guard_mod.program_use(w, a.handle),
     }
