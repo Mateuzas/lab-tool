@@ -32,11 +32,30 @@ class TestDiff(unittest.TestCase):
         self.assertEqual(changes.diff(a, copy.deepcopy(a)), [])
         self.assertEqual(changes.diff(None, a)[0][0], "program-new")
 
+    def test_access_granted_and_lost(self):
+        a = snap()
+        j = copy.deepcopy(a)
+        j["detail"], j["scope"], j["rules"] = "needs-join", None, None
+        ev = changes.diff(j, a)
+        self.assertEqual([k for k, _ in ev], ["access-granted"])
+        self.assertEqual(ev[0][1]["to"], "ok")
+        self.assertEqual(ev[0][1]["name"], a["name"])
+        self.assertEqual([k for k, _ in changes.diff(a, j)], ["access-lost"])
+        self.assertIn("needs-join -> ok", changes.summary("access-granted", ev[0][1]))
+
+    def test_following_in_program_and_rank_inputs(self):
+        from bounty import rank
+        rec = fx.list_record()
+        rec["following"] = True
+        p = normalise.program("intigriti-x", rec, fx.detail(rec), "ok", fx.FX, "t", None)
+        self.assertIs(p["following"], True)
+        self.assertIs(rank.inputs(p, parse_time("2026-01-01T00:00:00Z"))["following"], True)
+
     def test_needs_join_is_not_removal(self):
         a = snap()
         b = copy.deepcopy(a)
         b["detail"], b["scope"], b["rules"] = "needs-join", None, None
-        self.assertEqual(changes.diff(a, b), [])
+        self.assertEqual([k for k, _ in changes.diff(a, b)], ["access-lost"])
 
 
 class TestRun(unittest.TestCase):

@@ -33,6 +33,11 @@ def diff(prev, cur):
                                  "confidentiality": cur.get("confidentiality"),
                                  "max_eur": b.get("max_eur"), "detail": cur.get("detail")})]
     events = []
+    pd, cd = prev.get("detail"), cur.get("detail")
+    if pd == "needs-join" and cd == "ok":
+        events.append(("access-granted", {"name": cur.get("name"), "from": pd, "to": cd}))
+    elif pd == "ok" and cd == "needs-join":
+        events.append(("access-lost", {"name": cur.get("name"), "from": pd, "to": cd}))
     ps, cs = prev.get("scope"), cur.get("scope")
     # Scope and rules are only compared when both snapshots have them (a 403 or an unfetched
     # detail is not a removal).
@@ -72,6 +77,8 @@ def summary(kind, d):
     if kind == "program-new":
         return "%s (%s, %s, max €%s, detail %s)" % (d.get("name"), d.get("status"), d.get("confidentiality"),
                                                    d.get("max_eur"), d.get("detail"))
+    if kind in ("access-granted", "access-lost"):
+        return "%s: detail %s -> %s" % (d.get("name"), d.get("from"), d.get("to"))
     if kind in ("scope-added", "scope-removed"):
         tier = (" " + d["tier"]) if d.get("tier") else ""
         return "%s %s %s%s" % (d.get("list"), d.get("type"), d.get("value"), tier)
