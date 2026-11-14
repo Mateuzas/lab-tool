@@ -59,6 +59,7 @@ def inputs(p, now):
         "max_eur": b.get("max_eur"),
         "min_eur": b.get("min_eur"),
         "confidentiality": p.get("confidentiality"),
+        "following": bool(p.get("following")),
         "first_seen_at": p.get("first_seen_at"),
         "days_since_first_seen": _days_since(p.get("first_seen_at"), now),
         "paid_share": None, "surface": None, "web_entries": None,
