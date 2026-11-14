@@ -1,0 +1,436 @@
+#!/usr/bin/python3 -I
+"""Control of the scope guard inside kali-bounty (CONTRACTS §3.3). Run as root (docker exec).
+
+  bounty-ctl reload            re-read /bounty/active, its program.json and config/recon-sources.json,
+                               validate them and hand a snapshot to the guard (tmpfs, never /bounty).
+                               INTIGRITI_USERNAME (docker exec -e) fills {Username}; it is kept in
+                               tmpfs only. Exit 0 ok, 2 username missing/invalid, 4 profile or
+                               template cannot be enforced (the guard then refuses everything), 1 other.
+  bounty-ctl status [--json]   /bounty/state/guard.json in short
+  bounty-ctl autoreload        (supervisor) reload when the active program.json changed on disk
+  bounty-ctl init              (supervisor) tmpfs dirs, guard CA, trust store
+  bounty-ctl publish ...       (supervisor) write /bounty/state/guard.json
+"""
+
+import argparse
+import binascii
+import datetime
+import grp
+import hashlib
+import json
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+SHARE = os.environ.get("BOUNTY_SHARE", "/usr/local/share/bounty")
+sys.path.insert(0, SHARE)
+import guard_policy as gp  # noqa: E402
+
+ROOT = "/bounty"
+SNAP_DIR = "/dev/shm/bounty-guard"
+SNAPSHOT = SNAP_DIR + "/policy.json"
+RUN_DIR = "/dev/shm/bounty-guard-run"
+CA_DIR = ROOT + "/.guard-ca"
+STATE = ROOT + "/state/guard.json"
+HISTORY = SNAP_DIR + "/history.json"
+TRUST = "/usr/local/share/ca-certificates/bounty-guard-ca.crt"
+
+
+def iso_now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ids(name):
+    return pwd.getpwnam(name).pw_uid, grp.getgrnam(name).gr_gid
+
+
+def read_json(path):
+    with open(path) as f:
+        return json.load(f)
+
+
+def write_private(path, obj, uid, gid, mode):
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=d)
+    with os.fdopen(fd, "w") as f:
+        json.dump(obj, f, indent=1, sort_keys=True)
+        f.write("\n")
+    os.chown(tmp, uid, gid)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def fresh_dir(path, uid, gid, mode):
+    """Recreate a tmpfs dir we own. /dev/shm is world-writable: never trust what is already there."""
+    if os.path.islink(path) or os.path.exists(path):
+        if os.path.islink(path) or not os.path.isdir(path):
+            os.unlink(path)
+        else:
+            shutil.rmtree(path)
+    os.mkdir(path, mode)
+    os.chown(path, uid, gid)
+    os.chmod(path, mode)
+
+
+def die(msg, code):
+    sys.stderr.write("bounty-ctl: %s\n" % msg)
+    sys.exit(code)
+
+
+# ---------------------------------------------------------------------------------- init
+def cmd_init(_args):
+    guid, ggid = ids("guard")
+    fresh_dir(SNAP_DIR, 0, ggid, 0o750)     # root writes the policy, guard reads it
+    fresh_dir(RUN_DIR, guid, ggid, 0o700)   # guard's own: CA copy, status.json
+    conf = os.path.join(RUN_DIR, "conf")
+    os.mkdir(conf, 0o700)
+    os.chown(conf, guid, ggid)
+    ca = os.path.join(CA_DIR, "mitmproxy-ca.pem")
+    cert = os.path.join(CA_DIR, "mitmproxy-ca-cert.pem")
+    if not (_ca_ok(ca) and os.path.exists(cert)):
+        from mitmproxy.certs import CertStore
+        tmp = tempfile.mkdtemp(prefix="guard-ca-")
+        CertStore.create_store(__import__("pathlib").Path(tmp), "mitmproxy", 2048,
+                               organization="kali-lab bounty-guard", cn="kali-lab bounty-guard CA")
+        os.makedirs(CA_DIR, exist_ok=True)
+        for name in os.listdir(tmp):
+            shutil.copyfile(os.path.join(tmp, name), os.path.join(CA_DIR, name))
+        shutil.rmtree(tmp)
+        print("bounty-ctl: generated a new guard CA in %s" % CA_DIR)
+    for name in ("mitmproxy-ca.pem", "mitmproxy-ca-cert.pem"):
+        dst = os.path.join(conf, name)
+        shutil.copyfile(os.path.join(CA_DIR, name), dst)
+        os.chown(dst, guid, ggid)
+        os.chmod(dst, 0o600)
+    shutil.copyfile(cert, TRUST)
+    os.chmod(TRUST, 0o644)
+    subprocess.run(["update-ca-certificates"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+    print("bounty-ctl: guard CA installed in the trust store")
+
+
+def _ca_ok(path):
+    try:
+        raw = open(path, "rb").read()
+        from cryptography import x509
+        from cryptography.hazmat.primitives.serialization import load_pem_private_key
+        load_pem_private_key(raw, None)
+        x509.load_pem_x509_certificates(raw)
+        return True
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------------- reload
+def _recon_config():
+    for path in (os.path.join(ROOT, "config", "recon-sources.json"), os.path.join(SHARE, "recon-sources.json")):
+        if os.path.exists(path):
+            try:
+                return read_json(path), path
+            except ValueError as e:
+                raise gp.PolicyError("%s is not valid JSON: %s" % (path, e))
+    return {}, None
+
+
+def _previous_snapshot():
+    try:
+        return read_json(SNAPSHOT)
+    except (OSError, ValueError):
+        return {}
+
+
+def _wait_for_guard(generation, timeout=8.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            st = read_json(os.path.join(RUN_DIR, "status.json"))
+            if st.get("generation") == generation:
+                return st
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.2)
+    return None
+
+
+def _firewall_listed(nets):
+    subprocess.run(["bounty-firewall", "listed"] + nets, stdout=subprocess.DEVNULL, check=False)
+
+
+def _versions(profile):
+    """(scope version, rules version) of a profile, for the reload history."""
+    if not isinstance(profile, dict):
+        return None, None
+    sc, ru = profile.get("scope"), profile.get("rules")
+    return (sc.get("version") if isinstance(sc, dict) else None,
+            ru.get("version") if isinstance(ru, dict) else None)
+
+
+def _record(trigger, handle, prev, new, result):
+    """Reload history (last 20), shown in /bounty/state/guard.json as `reloads`, plus one line in
+    /bounty/state/guard-events.log."""
+    _, ggid = ids("guard")
+    entry = {"ts": iso_now(), "trigger": trigger, "program": handle,
+             "from": {"program": prev.get("handle"), "scope_version": prev.get("scope_version"),
+                      "rules_version": prev.get("rules_version"), "sha256": prev.get("sha256")},
+             "to": new, "result": result}
+    try:
+        hist = read_json(HISTORY)
+    except (OSError, ValueError):
+        hist = []
+    hist = (hist + [entry])[-20:]
+    write_private(HISTORY, hist, 0, ggid, 0o640)
+    try:
+        with open(os.path.join(ROOT, "state", "guard-events.log"), "a") as f:
+            f.write("%s reload (%s) %s: scope %s -> %s, rules %s -> %s: %s\n" % (
+                entry["ts"], trigger, handle, entry["from"]["scope_version"], new.get("scope_version"),
+                entry["from"]["rules_version"], new.get("rules_version"), result))
+    except OSError:
+        pass
+
+
+def _read_profile(path):
+    """(raw bytes or None, sha256 or None)."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return None, None
+    return raw, hashlib.sha256(raw).hexdigest()
+
+
+def reload_profile(trigger, username, recon, error=None):
+    """Validate the active program and hand it to the guard. Fails closed: on any error the guard
+    gets an error snapshot and refuses everything. Returns (exit code, message)."""
+    _, ggid = ids("guard")
+    prev = _previous_snapshot()
+    generation = binascii.hexlify(os.urandom(6)).decode()
+    try:
+        with open(os.path.join(ROOT, "active")) as f:
+            handle = f.read().strip()
+    except FileNotFoundError:
+        handle = ""
+
+    def publish(snap, nets, code, message, new):
+        snap.update({"generation": generation, "loaded_at": iso_now()})
+        write_private(SNAPSHOT, snap, 0, ggid, 0o640)
+        _firewall_listed(nets)
+        _record(trigger, snap.get("handle"), prev, new, "active" if code == 0 else "error: " + message)
+        if code != 0:
+            _wait_for_guard(generation, 3)   # return only once the guard refuses everything
+        return code, message
+
+    if not handle:
+        res = publish({"handle": None}, [], 0, "no active program: the guard refuses everything (no-profile)", {})
+        _wait_for_guard(generation, 3)
+        return res
+    if error:
+        return publish({"handle": handle, "error": error}, [], 4, error, {})
+    if not gp.HANDLE_RE.match(handle):
+        return publish({"handle": None, "error": "/bounty/active holds an invalid handle"}, [], 4,
+                       "/bounty/active holds an invalid handle", {})
+    path = os.path.join(ROOT, "programs", handle, "program.json")
+    raw, sha = _read_profile(path)
+    base = {"handle": handle, "sha256": sha, "recon": recon,
+            "username": username}   # kept so an automatic reload can refill templates
+    if raw is None:
+        msg = "cannot read %s" % path
+        return publish(dict(base, error=msg), [], 4, msg, {"sha256": None})
+    try:
+        profile = json.loads(raw.decode("utf-8"))
+    except ValueError as e:
+        msg = "%s is not valid JSON: %s" % (path, e)
+        return publish(dict(base, error=msg), [], 4, msg, {"sha256": sha})
+    sv, rv = _versions(profile)
+    new = {"scope_version": sv, "rules_version": rv, "sha256": sha}
+    base.update({"scope_version": sv, "rules_version": rv})
+    try:
+        policy = gp.Policy(profile, username, recon, handle)
+    except gp.PolicyError as e:
+        return publish(dict(base, error=e.message), [], e.exit_code, e.message, new)
+    slim = dict(profile)
+    if isinstance(slim.get("rules"), dict):
+        slim["rules"] = {k: v for k, v in slim["rules"].items() if k != "text"}
+    if not policy.ident.needs_username:
+        base["username"] = None
+    code, _ = publish(dict(base, profile=slim), [str(n) for n in policy.listed_networks], 0, "", new)
+    st = _wait_for_guard(generation)
+    d = policy.describe()
+    ident = []
+    if d["identification"]["request_header"]:
+        ident.append("header " + d["identification"]["request_header"])
+    if d["identification"]["user_agent"]:
+        ident.append("User-Agent template")
+    msg = ("active %s: %d in-scope / %d out-of-scope entries enforced, %s req/s%s, automation %s%s"
+           % (handle, d["scope_in"], d["scope_out"], _fmt(policy.rps),
+              "" if d["rate_limit_rps"] is not None else " (not stated: default)",
+              d["automation"], (", adds " + " + ".join(ident)) if ident else ""))
+    if st is None:
+        return 1, msg + "; the guard did not confirm the new profile within 8 s (bounty-ctl status)"
+    if st.get("status") != "active":
+        return 4, "the guard did not accept the profile: %s" % st.get("error")
+    return 0, msg
+
+
+def cmd_reload(_args):
+    """Explicit reload (program use): username from docker exec -e (or the previous snapshot),
+    recon sources re-read from /bounty/config."""
+    if not os.path.isdir(SNAP_DIR):
+        die("guard not initialised (is bounty-supervisor running?)", 1)
+    username = os.environ.get("INTIGRITI_USERNAME") or _previous_snapshot().get("username")
+    error = None
+    try:
+        recon, _ = _recon_config()
+        gp.compile_recon(recon)
+    except gp.PolicyError as e:
+        recon, error = None, e.message
+    code, msg = reload_profile("program use", username, recon, error)
+    if code == 0:
+        print("bounty-ctl: " + msg)
+        return 0
+    die("%s; the guard now refuses everything" % msg if code in (2, 4) else msg, code)
+
+
+def cmd_autoreload(_args):
+    """(supervisor, every few seconds) Reload by itself when the active program's program.json
+    changed on disk (a sync updated scope, rules or rate). Keeps the username and the recon
+    sources of the last explicit reload. Fails closed like an explicit reload."""
+    snap = _previous_snapshot()
+    handle = snap.get("handle")
+    if not handle or not gp.HANDLE_RE.match(handle) or "sha256" not in snap:
+        return 0
+    _, sha = _read_profile(os.path.join(ROOT, "programs", handle, "program.json"))
+    if sha == snap.get("sha256"):
+        return 0
+    try:
+        with open(os.path.join(ROOT, "active")) as f:
+            if f.read().strip() != handle:
+                return 0   # the active file is only switched by program use, which reloads itself
+    except OSError:
+        return 0
+    reload_profile("program.json changed", snap.get("username"), snap.get("recon") or {"hosts": []})
+    return 0   # result is in the reload history (guard.json `reloads`, guard-events.log)
+
+
+def _fmt(x):
+    return ("%g" % x) if isinstance(x, float) else str(x)
+
+
+# ---------------------------------------------------------------------------------- state
+def compose(firewall, guard, restarts, pid):
+    st = {}
+    try:
+        st = read_json(os.path.join(RUN_DIR, "status.json"))
+    except (OSError, ValueError):
+        pass
+    alive = guard == "up" and st.get("pid") == pid
+    snap = {}
+    try:
+        snap = read_json(SNAPSHOT)
+    except (OSError, ValueError):
+        pass
+    if firewall != "locked":
+        status = "error"
+    elif not alive:
+        status = "down" if guard != "starting" else "starting"
+    else:
+        status = st.get("status") or "starting"
+    pol = st.get("policy") if alive else None
+    err = None
+    if firewall != "locked":
+        err = "firewall not in place: nothing is let out"
+    elif alive and st.get("error"):
+        err = st["error"]
+    elif not alive and snap.get("error"):
+        err = snap["error"]
+    return {
+        "status": status,                      # active | no-profile | error | down | starting
+        "program": (st.get("program") if alive else snap.get("handle")),
+        "rate_limit_rps": pol.get("rate_limit_rps") if pol else None,
+        "effective_rps": pol.get("effective_rps") if pol else None,
+        "automation": pol.get("automation") if pol else None,
+        "identification": pol.get("identification") if pol else None,
+        "listed_networks": pol.get("listed_networks") if pol else [],
+        "firewall": firewall,                  # locked | broken
+        "guard": "up" if alive else guard,     # up | down | starting
+        "guard_pid": pid if alive else None,
+        "guard_restarts": restarts,
+        "egress_ip": st.get("egress_ip") if alive else None,
+        "egress_error": st.get("egress_error") if alive else None,
+        "counts": st.get("counts") if alive else None,
+        "last_refusals": st.get("last_refusals", []) if alive else [],
+        "last_error": err or (st.get("log_error") if alive else None),
+        "loaded_at": snap.get("loaded_at"),
+        "scope_version": snap.get("scope_version"),
+        "rules_version": snap.get("rules_version"),
+        "reloads": _history()[-5:],
+        "updated_at": iso_now(),
+    }
+
+
+def _history():
+    try:
+        h = read_json(HISTORY)
+        return h if isinstance(h, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def cmd_publish(args):
+    state = compose(args.firewall, args.guard, args.restarts, args.pid)
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f, indent=1)
+        f.write("\n")
+    os.replace(tmp, STATE)
+
+
+def cmd_status(args):
+    try:
+        st = read_json(STATE)
+    except (OSError, ValueError):
+        die("no %s yet (is bounty-supervisor running?)" % STATE, 1)
+    if args.json:
+        print(json.dumps(st, indent=1))
+        return 0
+    print("guard: %s (firewall %s, process %s, restarts %s)" % (st["status"], st["firewall"], st["guard"],
+                                                               st["guard_restarts"]))
+    print("program: %s" % (st.get("program") or "none"))
+    if st.get("effective_rps") is not None:
+        print("rate: %s req/s (profile: %s), automation %s" % (_fmt(st["effective_rps"]), st["rate_limit_rps"],
+                                                             st["automation"]))
+    if st.get("last_error"):
+        print("last error: %s" % st["last_error"])
+    for r in st.get("last_refusals") or []:
+        print("refused %s %s %s %s %s" % (r["ts"], r["reason"], r["actor"], r["method"], r["url"]))
+    return 0
+
+
+def main():
+    if os.geteuid() != 0:
+        die("run as root (docker exec kali-bounty bounty-ctl ...)", 1)
+    p = argparse.ArgumentParser(prog="bounty-ctl")
+    sub = p.add_subparsers(dest="cmd")
+    sub.add_parser("reload")
+    sub.add_parser("autoreload")
+    sub.add_parser("init")
+    s = sub.add_parser("status")
+    s.add_argument("--json", action="store_true")
+    pb = sub.add_parser("publish")
+    pb.add_argument("--firewall", default="broken")
+    pb.add_argument("--guard", default="down")
+    pb.add_argument("--restarts", type=int, default=0)
+    pb.add_argument("--pid", type=int, default=0)
+    args = p.parse_args()
+    fn = {"reload": cmd_reload, "autoreload": cmd_autoreload, "init": cmd_init, "status": cmd_status, "publish": cmd_publish}.get(args.cmd)
+    if fn is None:
+        p.print_help(sys.stderr)
+        return 64
+    return fn(args) or 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

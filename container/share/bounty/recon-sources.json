@@ -1,0 +1,9 @@
+{
+  "hosts": [
+    "crt.sh",
+    "web.archive.org",
+    "api.ipify.org"
+  ],
+  "rate_limit_rps": 2,
+  "egress_ip_url": "https://api.ipify.org"
+}

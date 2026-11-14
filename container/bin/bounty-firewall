@@ -1,0 +1,104 @@
+#!/bin/sh
+# kali-bounty egress lock (ADR 005, CONTRACTS §3.3). Runs INSIDE the container as root.
+#   bounty-firewall lock               OUTPUT/INPUT/FORWARD default DROP (IPv4 + IPv6); only uid guard
+#                                      may open outbound connections; DNS only for guard, only to
+#                                      the resolvers in /etc/resolv.conf; INPUT: the guard port
+#   bounty-firewall listed [cidr...]   internal ranges the active profile lists (guard may reach them)
+#   bounty-firewall check              exit 0 if the live rules are exactly what lock/listed installed
+#   bounty-firewall status
+# The guard addon refuses internal addresses itself; BOUNTY_INTERNAL is the kernel backstop for it.
+set -eu
+
+GUARD_UID=${BOUNTY_GUARD_UID:-990}
+GUARD_PORT=${BOUNTY_GUARD_PORT:-8080}
+EXPECTED=/run/bounty-firewall.expected
+LISTED=/run/bounty-firewall.listed
+INTERNAL4="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 224.0.0.0/4 240.0.0.0/4"
+INTERNAL6="::/128 ::1/128 fc00::/7 fe80::/10 fec0::/10 ff00::/8"
+
+resolvers() { awk '/^nameserver/{print $2}' /etc/resolv.conf 2>/dev/null; }
+is6() { case "$1" in *:*) return 0 ;; *) return 1 ;; esac; }
+
+snapshot() {
+  for t in iptables ip6tables; do
+    $t -S INPUT; $t -S FORWARD; $t -S OUTPUT; $t -S BOUNTY_INTERNAL
+  done 2>&1
+  resolvers
+}
+
+fill_internal() {
+  # $1 = iptables|ip6tables; listed CIDRs come from $LISTED (one per line)
+  t=$1
+  $t -F BOUNTY_INTERNAL
+  if [ -f "$LISTED" ]; then
+    while read -r net; do
+      [ -n "$net" ] || continue
+      if is6 "$net"; then [ "$t" = ip6tables ] || continue; else [ "$t" = iptables ] || continue; fi
+      $t -A BOUNTY_INTERNAL -d "$net" -j RETURN
+    done < "$LISTED"
+  fi
+  if [ "$t" = iptables ]; then
+    for net in $INTERNAL4; do $t -A BOUNTY_INTERNAL -d "$net" -j REJECT --reject-with icmp-admin-prohibited; done
+  else
+    for net in $INTERNAL6; do $t -A BOUNTY_INTERNAL -d "$net" -j REJECT --reject-with icmp6-adm-prohibited; done
+  fi
+  $t -A BOUNTY_INTERNAL -j RETURN
+}
+
+lock() {
+  for t in iptables ip6tables; do
+    # Close first, then rebuild: there is never a moment with an open policy.
+    $t -P OUTPUT DROP; $t -P INPUT DROP; $t -P FORWARD DROP
+    $t -F OUTPUT; $t -F INPUT; $t -F FORWARD
+    $t -N BOUNTY_INTERNAL 2>/dev/null || true
+    fill_internal "$t"
+    if [ "$t" = iptables ]; then rej="--reject-with icmp-admin-prohibited"; else rej="--reject-with icmp6-adm-prohibited"; fi
+
+    $t -A INPUT -i lo -j ACCEPT
+    $t -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    $t -A INPUT -p tcp --dport "$GUARD_PORT" -m conntrack --ctstate NEW -j ACCEPT
+
+    # A resolver on loopback (Docker's embedded DNS) is for the guard only.
+    for ns in $(resolvers); do
+      if is6 "$ns"; then [ "$t" = ip6tables ] || continue; else [ "$t" = iptables ] || continue; fi
+      $t -A OUTPUT -d "$ns" -m owner --uid-owner "$GUARD_UID" -j ACCEPT
+      # shellcheck disable=SC2086
+      $t -A OUTPUT -d "$ns" -j REJECT $rej
+    done
+    $t -A OUTPUT -o lo -j ACCEPT
+    $t -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    $t -A OUTPUT -m owner --uid-owner "$GUARD_UID" -m conntrack --ctstate NEW -j BOUNTY_INTERNAL
+    $t -A OUTPUT -m owner --uid-owner "$GUARD_UID" -m conntrack --ctstate NEW -j ACCEPT
+    # Everyone else: refused at once (a tool that ignores the proxy fails fast, not after a timeout).
+    # shellcheck disable=SC2086
+    $t -A OUTPUT -j REJECT $rej
+  done
+  snapshot > "$EXPECTED"
+}
+
+# One writer or checker at a time: a check must never see a half-applied rule set.
+exec 9> /run/bounty-firewall.lock
+flock 9
+
+case "${1:-status}" in
+  lock)
+    lock
+    echo "bounty-firewall: locked (only uid $GUARD_UID may connect out; resolvers: $(resolvers | tr '\n' ' '))" ;;
+  listed)
+    shift
+    : > "$LISTED.tmp"
+    for net in "$@"; do printf '%s\n' "$net" >> "$LISTED.tmp"; done
+    mv "$LISTED.tmp" "$LISTED"
+    iptables -S BOUNTY_INTERNAL >/dev/null 2>&1 || { echo "bounty-firewall: not locked"; exit 1; }
+    fill_internal iptables
+    fill_internal ip6tables
+    snapshot > "$EXPECTED"
+    echo "bounty-firewall: listed internal ranges: ${*:-none}" ;;
+  check)
+    [ -f "$EXPECTED" ] || exit 1
+    snapshot | cmp -s - "$EXPECTED" ;;
+  status)
+    snapshot ;;
+  *)
+    echo "usage: bounty-firewall lock | listed [cidr...] | check | status"; exit 64 ;;
+esac

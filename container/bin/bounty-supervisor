@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Bug bounty supervisor: main process of kali-bounty (ADR 005, CONTRACTS §3.3).
+#  - locks egress with bounty-firewall before anything else, and re-checks it every second;
+#    if the rules drift, the guard is killed at once and only restarted after the lock is back
+#  - starts the guard (bounty-guard: mitmdump + addon as uid guard) and restarts it if it dies
+#  - reloads the guard when the active program.json changes on disk (bounty-ctl autoreload)
+#  - writes /bounty/state/guard.json (bounty-ctl publish) for host/bounty and the app
+# The guard starts with no profile (refuses everything) until `host/bounty program use <handle>`.
+set -u
+
+STATE=/bounty/state
+EVENTS=$STATE/guard-events.log
+GUARD_LOG=/var/log/bounty-guard.log
+mkdir -p "$STATE"
+
+guard_pid=0; restarts=0; started=0; firewall=broken; last_publish=0; last_autoreload=0
+
+log() { echo "$(date -u +%FT%TZ) $*" >> "$EVENTS"; }
+
+guard_alive() { [ "$guard_pid" -gt 0 ] && kill -0 "$guard_pid" 2>/dev/null; }
+
+stop_guard() {
+  if [ "$guard_pid" -gt 0 ]; then kill -9 "$guard_pid" 2>/dev/null; wait "$guard_pid" 2>/dev/null; fi
+  pkill -9 -u guard 2>/dev/null   # anything else running as guard (there should be nothing)
+  guard_pid=0
+}
+
+start_guard() {
+  bounty-guard >> "$GUARD_LOG" 2>&1 &
+  guard_pid=$!
+  [ "$started" -eq 1 ] && restarts=$((restarts + 1))
+  started=1
+  log "guard started (pid $guard_pid)"
+}
+
+publish() {
+  local g=down
+  guard_alive && g=up
+  bounty-ctl publish --firewall "$firewall" --guard "$g" --restarts "$restarts" --pid "$guard_pid" 2>/dev/null
+}
+
+trap 'stop_guard; log "supervisor stopped"; exit 0' TERM INT
+log "supervisor started"
+
+if ! bounty-firewall lock >/dev/null 2>&1; then
+  log "cannot install the firewall (is NET_ADMIN missing?): the guard will not start"
+fi
+if ! bounty-ctl init >> "$EVENTS" 2>&1; then
+  log "guard init failed: the guard will not start"
+  init_failed=1
+else
+  init_failed=0
+fi
+
+while true; do
+  if bounty-firewall check; then
+    [ "$firewall" = locked ] || log "firewall locked"
+    firewall=locked
+  else
+    # Fail closed: nothing may run that can connect out while the rules are not exactly ours.
+    [ "$firewall" = broken ] || log "firewall changed: guard stopped, re-locking"
+    firewall=broken
+    stop_guard
+    bounty-firewall lock >/dev/null 2>&1 && bounty-firewall check && { firewall=locked; log "firewall re-locked"; }
+    # lock re-reads the profile's listed ranges from /run/bounty-firewall.listed
+  fi
+
+  if [ "$firewall" = locked ] && [ "$init_failed" -eq 0 ] && ! guard_alive; then
+    [ "$guard_pid" -gt 0 ] && log "guard exited (pid $guard_pid): restarting"
+    stop_guard
+    start_guard
+  fi
+
+  now=$(date +%s)
+  # A sync that changed the active program.json (scope, rules, rate) is picked up without a
+  # manual step; a profile that no longer validates makes the guard refuse everything.
+  if [ $((now - last_autoreload)) -ge 3 ] && [ "$init_failed" -eq 0 ]; then
+    bounty-ctl autoreload >> "$EVENTS" 2>&1
+    last_autoreload=$now
+  fi
+  if [ $((now - last_publish)) -ge 1 ]; then publish; last_publish=$now; fi
+  sleep 1 &
+  wait $!
+done
