@@ -45,6 +45,10 @@ field() {
 }
 
 ensure_container() {
+  # One mode at a time (CONTRACTS §3.3): Lab stops the Bug bounty container.
+  if [ "$(docker inspect -f '{{.State.Running}}' kali-bounty 2>/dev/null)" = true ]; then
+    docker stop kali-bounty >/dev/null && echo "stopped kali-bounty: one mode at a time (host/bounty guard start brings it back)"
+  fi
   if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
     docker run -d --name "$CONTAINER" --init --restart unless-stopped \
       --cap-add=NET_ADMIN --device /dev/net/tun \

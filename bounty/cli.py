@@ -6,6 +6,7 @@ import os
 import sys
 
 from bounty import changes as changes_mod
+from bounty import guard as guard_mod
 from bounty import rank as rank_mod
 from bounty import sync as sync_mod
 from bounty.config import load_ranking
@@ -48,6 +49,17 @@ def build_parser():
     c.add_argument("--since", help="compare with the state at this time (YYYYMMDDTHHMMSSZ or ISO 8601)")
     c.add_argument("--json", action="store_true",
                    help='print [{"ts","handle","kind","detail"}] (exit 1 and [] when nothing changed)')
+    g = sub.add_parser("guard", help="the scope guard container kali-bounty (CONTRACTS §3.3)")
+    gs = g.add_subparsers(dest="cmd")
+    gs.add_parser("start", help="start kali-bounty (stops kali-lab: one mode at a time)")
+    gs.add_parser("stop", help="remove kali-bounty (the workspace is kept)")
+    gst = gs.add_parser("status", help="active program, rate limit, last refusals")
+    gst.add_argument("--json", action="store_true")
+    prog = sub.add_parser("program", help="one program")
+    prs = prog.add_subparsers(dest="cmd")
+    u = prs.add_parser("use", help="make a program the guard's active profile "
+                                   "(run via scripts/secrets.sh exec intigriti -- for INTIGRITI_USERNAME)")
+    u.add_argument("handle")
     return p
 
 
@@ -177,12 +189,20 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     ws = workspace_dir()
-    handlers = {"sync": cmd_sync, "status": cmd_status, "list": cmd_list, "rank": cmd_rank, "changes": cmd_changes}
-    if args.group != "programs" or getattr(args, "cmd", None) not in handlers:
+    handlers = {
+        ("programs", "sync"): cmd_sync, ("programs", "status"): cmd_status, ("programs", "list"): cmd_list,
+        ("programs", "rank"): cmd_rank, ("programs", "changes"): cmd_changes,
+        ("guard", "start"): lambda a, w: guard_mod.guard_start(w),
+        ("guard", "stop"): lambda a, w: guard_mod.guard_stop(),
+        ("guard", "status"): lambda a, w: guard_mod.guard_status(a.json),
+        ("program", "use"): lambda a, w: guard_mod.program_use(w, a.handle),
+    }
+    fn = handlers.get((args.group, getattr(args, "cmd", None)))
+    if fn is None:
         parser.print_help(sys.stderr)
         return 64
     try:
-        return handlers[args.cmd](args, ws)
+        return fn(args, ws)
     except BountyError as e:
         sys.stderr.write("bounty: %s: %s\n" % (e.code, _scrub(e.message)))
         return e.exit_code
