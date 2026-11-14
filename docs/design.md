@@ -341,6 +341,3 @@ Notes from FE-2 (PR #10):
 - Colour by meaning only: violet = mode/selection/news, green = scope added/new program, red = scope removed/errors/no-auto flag.
 - Responsive: surface and scope columns hide below 1100 px; factors, access and handles below 640 px.
 - Every action has a key shown as a `kbd` next to its button and in the footer.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
