@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { setupGuard } from "./guard";
 
 /**
@@ -25,6 +26,14 @@ export type SyncEvent =
   | { kind: "done"; changes: ChangeEvent[] }
   | { kind: "error"; code: string; message: string };
 export type ChangeEvent = { ts: string; handle: string; kind: string; detail: Record<string, unknown> };
+export type AlertState = { next_sync_at: string | null; last_sync_at: string | null; last_alerts: { ts: string; text: string }[] };
+
+/** "14:02" in local time. */
+export function clock(iso: string | null | undefined) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
 
 type ColKey = "rank" | "name" | "total" | "payout" | "findability" | "competition" | "friction"
   | "max" | "surface" | "scope" | "conf" | "flags" | "link";
@@ -99,6 +108,10 @@ export function describe(c: ChangeEvent): string {
       const b = (x: unknown) => { const o = (x ?? {}) as Record<string, unknown>; return `${money(o.min as number)}–${money(o.max as number)} ${o.currency ?? ""}`.trim(); };
       return `Bounty ${b(d.from)} → ${b(d.to)}`;
     }
+    case "access-granted":
+      return "Access granted — scope loaded";
+    case "access-lost":
+      return "Access lost — join again to test";
     case "rules-changed": {
       const fields = Object.keys((d.fields ?? {}) as object);
       if (d.text_changed) fields.push("text");
@@ -114,6 +127,8 @@ function tagFor(list: ChangeEvent[]): string {
   const n = (k: string) => list.filter((c) => c.kind === k).length;
   if (n("program-new")) return "new";
   const parts: string[] = [];
+  if (n("access-granted")) parts.push("access granted");
+  if (n("access-lost")) parts.push("access lost");
   const add = n("scope-added"), rem = n("scope-removed");
   if (add || rem) parts.push([add ? `+${add}` : "", rem ? `−${rem}` : ""].filter(Boolean).join(" ") + " scope");
   if (n("bounty-changed")) parts.push("bounty");
@@ -132,6 +147,13 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   let refreshError: { code: string; message: string } | null = null;
   let changes: ChangeEvent[] = [];
   let changesOpen = false;
+  let alerts: AlertState | null = null;
+  const key = (c: ChangeEvent) => `${c.ts}|${c.handle}|${c.kind}|${JSON.stringify(c.detail ?? {})}`;
+  /** Background syncs add to the list instead of replacing what the user hasn't dismissed yet. */
+  function mergeChanges(add: ChangeEvent[]) {
+    const seen = new Set(changes.map(key));
+    changes = [...changes, ...add.filter((c) => !seen.has(key(c)))];
+  }
   let filter = "";
   let sort: { key: ColKey; dir: 1 | -1 } = { key: "rank", dir: 1 };
   let showExcluded = false;
@@ -287,6 +309,8 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     name.append(a, el("span", "handle", p.handle));
     if (changed) {
       const tag = el("span", "pg-tag", tagFor(changed));
+      const last = changed.filter((c) => c.kind.startsWith("access-")).pop();
+      if (last) tag.dataset.access = last.kind === "access-granted" ? "granted" : "lost";
       tag.title = changed.map(describe).join("\n");
       name.append(tag);
     }
@@ -395,14 +419,17 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       line = progress && progress.total
         ? `Refreshing ${progress.done}/${progress.total}…`
         : "Refreshing…";
-    } else if (st?.last_sync_at) {
-      line = `Synced ${ago(st.last_sync_at)}`;
+    } else if (st?.last_sync_at || alerts?.last_sync_at) {
+      const at = alerts?.last_sync_at ?? st!.last_sync_at;
+      line = `Synced ${clock(at)}`;
+      if (alerts?.next_sync_at) line += ` · Next sync ${clock(alerts.next_sync_at)}`;
     } else line = ranking ? "Never synced" : "";
     if (st && (st.programs || st.last_sync_at)) line += ` · ${st.open} open · ${st.needs_join} need joining`;
     const status = $("pg-status");
     status.textContent = line;
     status.dataset.state = running ? "running" : "";
-    status.title = running && progress?.text ? progress.text : "";
+    const at = alerts?.last_sync_at ?? st?.last_sync_at ?? null;
+    status.title = running && progress?.text ? progress.text : at ? `Synced ${ago(at)}` : "";
     status.style.setProperty("--p", running && progress?.total ? String(progress.done / progress.total) : "0");
 
     const err = $("pg-error");
@@ -463,6 +490,15 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       return li;
     });
     $("pg-changes-items").replaceChildren(...items);
+    const recent = (alerts?.last_alerts ?? []).slice(0, 5);
+    $("pg-alerts").hidden = !recent.length;
+    $("pg-alerts-items").replaceChildren(...recent.map((a) => {
+      const li = el("li");
+      const t = el("time", "", clock(a.ts));
+      t.dateTime = a.ts;
+      li.append(t, el("span", "", a.text));
+      return li;
+    }));
   }
 
   // ---- Actions ----
@@ -488,6 +524,16 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     document.getElementById("programs")!.dataset.ready = "true";
   }
 
+  async function loadAlerts() {
+    try {
+      alerts = await invoke<AlertState>("bounty_alert_state");
+    } catch {
+      alerts = null; // older backend: fall back to "Synced"
+    }
+    drawChrome();
+    drawChanges();
+  }
+
   async function refresh() {
     if (running) return;
     running = true;
@@ -507,6 +553,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
         changes = ev.changes ?? [];
         changesOpen = false;
         void load();
+        void loadAlerts();
       } else if (ev.kind === "error") {
         finished = true;
         running = false;
@@ -582,8 +629,15 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     if (p) void open(p);
   }
 
-  // "Synced 14 min ago" stays true while the window is open.
-  setInterval(() => { if (!running) drawChrome(); }, 30000);
+  // Background sync (CONTRACTS §9.2): Rust refreshes every 20 min and tells us.
+  void listen<ChangeEvent[]>("bounty-synced", (e) => {
+    if (running) return; // our own refresh: `done` already handled it
+    mergeChanges(e.payload ?? []);
+    void load();
+    void loadAlerts();
+  });
+  // Keep "Next sync" current while the screen is visible.
+  setInterval(() => { if (opts.visible() && !running) void loadAlerts(); }, 60000);
 
   render();
   return {
@@ -591,6 +645,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     async start() {
       guard.wake();
       await load();
+      void loadAlerts();
       await refresh();
     },
     focus() {

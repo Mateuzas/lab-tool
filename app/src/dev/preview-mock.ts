@@ -125,6 +125,27 @@ function guardStatus() {
   if (guardMode === "lost" && ++guardPolls > 1) guard = { ...G0, running: true, status: "no-profile" };
   return guard;
 }
+// Background sync (CONTRACTS §9.2): ?sync=1 fires one `bounty-synced` 2 s after load.
+const listeners = new Map<string, number[]>();
+let nextSyncAt = new Date(Date.now() + 20 * 60000).toISOString();
+const alertsLog: { ts: string; text: string }[] = [];
+const SYNC_CHANGES = [
+  { ts: iso(0), handle: "intigriti-dropbox", kind: "access-granted", detail: { from: "needs-join", to: "ok" } },
+  { ts: iso(0), handle: "intigriti-dropbox", kind: "scope-added", detail: { list: "in", type: "wildcard", value: "*.dropboxbusiness.com", tier: "Tier 1", version: 15 } },
+  { ts: iso(0), handle: "intigriti-intergamma", kind: "access-lost", detail: { from: "ok", to: "needs-join" } },
+];
+function emit(event: string, payload: unknown) {
+  for (const id of listeners.get(event) ?? []) callbacks.get(id)?.({ event, id: 1, payload });
+}
+if (new URLSearchParams(location.search).get("sync") === "1") {
+  setTimeout(() => {
+    lastSync = iso(0);
+    nextSyncAt = new Date(Date.now() + 20 * 60000).toISOString();
+    alertsLog.unshift({ ts: iso(0), text: "Access granted: Dropbox — scope is in the app" },
+      { ts: iso(0), text: "Dropbox: new scope *.dropboxbusiness.com (Tier 1)" });
+    emit("bounty-synced", SYNC_CHANGES);
+  }, 2000);
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let refreshing = false;
 
@@ -174,7 +195,12 @@ async function bountyRefresh(channel: { id: number }) {
     if (cmd === "term_attach") { startShell(Number(args.id), args.onEvent as unknown as { id: number }); return null; }
     if (cmd === "term_popout") { window.open(`?popout=${args.id}`, "_blank", "width=900,height=560"); return null; }
     if (cmd === "term_close") { shells.delete(Number(args.id)); return null; }
-    if (cmd === "plugin:event|listen") return 1;
+    if (cmd === "plugin:event|listen") {
+      const a = args as unknown as { event: string; handler: number };
+      listeners.set(a.event, [...(listeners.get(a.event) ?? []), a.handler]);
+      return a.handler;
+    }
+    if (cmd === "bounty_alert_state") return { next_sync_at: progMode.startsWith("empty") ? null : nextSyncAt, last_sync_at: lastSync, last_alerts: alertsLog.slice(0, 5) };
     if (cmd === "plugin:event|unlisten") return null;
     if (cmd === "term_write") { shells.get(Number(args.id))?.(args.data); return null; }
     if (cmd === "add_vpn_file") {

@@ -525,7 +525,16 @@ kbd {
 .pg-changes .who { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pg-changes .what { color: var(--ink-soft); overflow-wrap: anywhere; }
 .pg-changes .kind-scope-added, .pg-changes .kind-program-new { color: var(--go); }
-.pg-changes .kind-scope-removed { color: var(--stop); }
+.pg-changes .kind-scope-removed, .pg-changes .kind-access-lost { color: var(--stop); }
+.pg-changes .kind-access-granted { color: var(--go); font-weight: 700; }
+.pg-alerts { border-top: 1px solid var(--hair); padding: 6px 12px 8px; }
+.pg-alerts[hidden] { display: none; }
+.pg-alerts h3 { margin: 0 0 2px; font-size: 0.85em; font-weight: 700; color: var(--ink-soft); }
+.pg-alerts ul { padding: 0; max-height: 12vh; }
+.pg-alerts li { display: flex; gap: 10px; padding: 1px 0; font-size: 0.9em; color: var(--ink-soft); }
+.pg-alerts time { font-family: var(--mono); flex: none; }
+.pg-tag[data-access="granted"] { background: color-mix(in srgb, var(--go) 14%, var(--field)); color: var(--go); }
+.pg-tag[data-access="lost"] { background: color-mix(in srgb, var(--stop) 12%, var(--field)); color: var(--stop); }
 
 /* The table: a white sheet that scrolls under a sticky header. */
 .pg-table-wrap {
