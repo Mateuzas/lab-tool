@@ -58,11 +58,25 @@ Follow-ups from slice 1b:
 | OPS-4 | DevOps | Image: mitmproxy, users `guard` (990) and `hunter` (1000), recon tools (subfinder, httpx-toolkit, katana, ffuf, nuclei, dnsx) from Kali's repo (CONTRACTS §3.3) | – | done (#13) | image builds in CI; `kali-bounty` starts with only `workspace/bounty` mounted |
 | BE-5 | Backender | `bounty-guard` addon + `bounty-supervisor` + iptables uid lock + `bounty-ctl reload` + `bounty-run`; `host/bounty guard start|stop|status` (CONTRACTS §3, §5, §6) | OPS-4, BE-2 | done (#14, 118 checks) | `tests/bounty-guard-test.sh` proves, with local listeners and a fake profile: no profile refuses all; out-of-scope beats in-scope; host mismatch refused; internal addresses refused; a tool ignoring the proxy can't connect; rate limit holds; header added; actor header stripped; every flow logged |
 | BE-6 | Backender | `program use` wires the active profile and the header value; Burp launch with upstream proxy `127.0.0.1:8081` | BE-5 | done (#14, #17; verified on www.dropbox.com) | Burp request to an in-scope test host shows in the flow log; out-of-scope gets the 403 |
-| BE-16 | Backender | Tauri commands of CONTRACTS §9.1; `start_lab` stops the guard | BE-6 | in progress | Rust tests (handle validation, status parsing); works from the built app |
-| FE-4 | Frontender | Guard controls on the Programs screen (CONTRACTS §9.1: `u`, `b`, `g`, header status, active row) | – (mock) | in progress | type-check, build, ui-shots of guard off/active/error |
+| BE-16 | Backender | Tauri commands of CONTRACTS §9.1; `start_lab` stops the guard | BE-6 | done (#19) | Rust tests (handle validation, status parsing); works from the built app |
+| FE-4 | Frontender | Guard controls on the Programs screen (CONTRACTS §9.1: `u`, `b`, `g`, header status, active row) | – (mock) | done (#20) | type-check, build, ui-shots of guard off/active/error |
 | BE-7 | Backender | `hunter/` Claude Code project: CLAUDE.md draft for the Architect, settings (read the program folder, Burp MCP read-only, `bounty-run --actor claude` only, approval per command) | BE-5 | todo | Claude can read a profile and run an approved in-scope `curl`, labelled `claude` in the log; an unapproved command doesn't run |
 | USER-3 | User | Dropbox prep: find your `@intigriti.me` alias in your Intigriti profile; create two free Dropbox test accounts with it (e.g. `you+a@intigriti.me`, `you+b@intigriti.me`, so you can test one account against the other) | – | todo | two test accounts exist |
 | USER-2 | User | **First hunting session** on the chosen program with the CLI + Burp; keep a friction list | BE-6 | todo | friction list → next slice |
+
+## Strategy and next slices (agreed 2026-11-14)
+
+Hybrid: go **deep on one program** (Dropbox) and **be early on fresh scope**, using automation to
+find *where to look* and to half-automate access-control checks, never to mass-report. Measure €/hour
+per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranking on it.
+
+| Id | Owner | Task | Status |
+|---|---|---|---|
+| BE-17 | Backender | Background sync every 15–30 min while the app runs (incremental, ≤ 1 req/s) + macOS notification for new programs and new in-scope assets on ranked/followed programs | todo (next) |
+| BE-18 | Backender | Fresh-asset mapping: on a new in-scope asset, passive recon + httpx/katana through the guard within the program's rate, results in `work/<handle>/recon/` as a "look here" list | todo |
+| BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | todo |
+| BE-7 | Backender | `hunter/` Claude copilot (see slice 2) | todo |
+| BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
 
 ## Later (in rough order, re-planned after each hunting session)
 
