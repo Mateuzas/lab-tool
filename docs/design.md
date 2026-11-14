@@ -327,3 +327,20 @@ a launch screen ("work in progress").
 - Known limits: Bug bounty has no backend (its "running" is a UI flag); Burp stays open when the
   lab stops (it's the user's own project, we don't close it) but its proxy now points at nothing;
   the mode on screen isn't remembered across app restarts (always opens on Lab).
+
+## Pass 9 (2026-11-14): Bug bounty Programs screen
+
+Bug bounty mode is for an experienced hunter: speed and density over explanation (ADR 003).
+Notes from FE-2 (PR #10):
+
+
+- Brief: experienced hunter, speed over friendliness. Same Argo palette and Atkinson fonts as Lab; the mode accent `--cta` = violet `#6b46c1` carries selection, sort arrows, bars, change tags.
+- Layout: full-height screen, wider column `min(1480px, 100% - 2·clamp(14px,2.5vw,40px))`; head (title, status, Refresh) → tools (filter, changes, join, excluded) → white table sheet with sticky header that scrolls on its own → key footer. 30 px rows, 13–15 px type.
+- Mono (Atkinson Hyperlegible Mono) for numeric columns and handles only: digits line up and handles are identifiers you copy to the CLI (same rule as IPs in Lab).
+- The memorable element is the Total bar: solid when the program is known, hatched for join programs (estimated: findability and friction assumed, those two cells dotted/dimmed).
+- Colour by meaning only: violet = mode/selection/news, green = scope added/new program, red = scope removed/errors/no-auto flag.
+- Responsive: surface and scope columns hide below 1100 px; factors, access and handles below 640 px.
+- Every action has a key shown as a `kbd` next to its button and in the footer.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
