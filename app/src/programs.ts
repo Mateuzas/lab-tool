@@ -1,6 +1,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { setupGuard } from "./guard";
+import { setupLookHere } from "./lookhere";
 
 /**
  * Bug bounty's Programs screen (FE-2). Shows the cached ranking at once, refreshes in the
@@ -178,7 +179,12 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   const guard = setupGuard({
     visible: opts.visible,
     nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
-    onChange: () => markActive(),
+    onChange: () => { markActive(); look.redraw(); },
+  });
+  const look = setupLookHere({
+    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
+    active: () => guard.active(),
+    onClose: () => { wrap.focus({ preventScroll: true }); },
   });
 
   // ---- Header (built once) ----
@@ -664,6 +670,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   document.addEventListener("keydown", (e) => {
     if (!opts.visible() || e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target as HTMLElement;
+    if (look.isOpen()) { if (look.key(e)) e.preventDefault(); return; }
     if (t === filterBox) {
       if (e.key === "Escape") { e.preventDefault(); if (filterBox.value) { filterBox.value = ""; filter = ""; render(); } else filterBox.blur(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
@@ -699,6 +706,8 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "a": void cycleApplication(); break;
       case "?": toggleHelp(true); break;
       case "R": guard.toggleRefusals(); break;
+      case "l": if (selected) look.open(selected); break;
+      case "m": if (selected) look.map(selected); break;
       case "c": if (changes.length) { changesOpen = !changesOpen; drawChrome(); } break;
       case "Escape":
         if (!help.hidden) toggleHelp(false);

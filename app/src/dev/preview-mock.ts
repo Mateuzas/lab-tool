@@ -154,6 +154,61 @@ if (new URLSearchParams(location.search).get("sync") === "1") {
     emit("bounty-synced", SYNC_CHANGES);
   }, 2000);
 }
+// ---- Recon look-here list (CONTRACTS §10): ?m=running keeps `recon map` mid-progress; ?recon=1
+// fires `bounty-recon-updated` for Dropbox 2 s after load (one more new host appears).
+const mapMode = new URLSearchParams(location.search).get("m") ?? "done";
+type R = [string, string, boolean, boolean | null, number | null, string | null, string[], number, string[]];
+const DROPBOX: R[] = [
+  ["paper.dropboxbusiness.com", "in-scope", true, true, 200, "Dropbox Paper — Sign in", ["React", "Cloudflare"], 214, ["login", "api", "js-heavy"]],
+  ["api-beta.dropboxbusiness.com", "in-scope", true, true, 200, "GraphQL Playground", ["Node.js", "Express"], 38, ["api", "graphql", "debug"]],
+  ["admin.dropboxbusiness.com", "in-scope", true, true, 302, "Redirecting…", ["nginx"], 12, ["admin", "login", "redirect-offsite"]],
+  ["upload.dropboxbusiness.com", "in-scope", true, false, null, null, [], 0, ["upload"]],
+  ["sso.dropboxbusiness.com", "in-scope", true, null, null, null, [], 0, []],
+  ["www.dropbox.com", "in-scope", false, true, 200, "Dropbox", ["React", "Envoy"], 300, ["login", "upload", "js-heavy"]],
+  ["api.dropboxapi.com", "in-scope", false, true, 400, "Error in call to API function", ["Envoy"], 41, ["api", "swagger"]],
+  ["status.dropbox.com", "in-scope", false, true, 200, "Dropbox Status", ["Statuspage"], 17, []],
+  ["staging-paper.dropbox.com", "in-scope", false, false, null, null, [], 0, []],
+  ["community.dropbox.com", "out-of-scope", false, true, 200, "Dropbox Community", ["Khoros"], 0, ["login"]],
+  ["blog.dropbox.com", "out-of-scope", false, true, 200, "Dropbox Blog", ["WordPress"], 0, []],
+  ["help.dropbox.com", "not-in-scope", true, true, 200, "Dropbox Help Center", ["Next.js"], 0, []],
+];
+const interest = (r: R) => Math.min(1, (r[2] ? 0.35 : 0) + (r[3] ? 0.15 : 0) + 0.1 * r[8].length);
+const toRow = (r: R) => ({ host: r[0], scope: r[1], new: r[2], live: r[3], status: r[4], title: r[5], tech: r[6], urls: r[7], signals: r[8], interest: interest(r) });
+let reconExtra: R[] = [];
+function reconList(handle: string) {
+  let list: R[];
+  if (handle === "intigriti-dropbox") list = [...DROPBOX, ...reconExtra];
+  else {
+    const d = handle.replace(/^intigriti-/, "").replace(/bugbounty|-/g, "") + ".com";
+    list = [
+      [`app.${d}`, "in-scope", true, true, 200, "Sign in", ["Vue.js"], 87, ["login", "api"]],
+      [`www.${d}`, "in-scope", false, true, 200, "Home", ["nginx"], 120, []],
+      [`dev.${d}`, "in-scope", false, false, null, null, [], 0, ["debug"]],
+      [`shop.${d}`, "out-of-scope", false, true, 200, "Shop", ["Shopify"], 0, []],
+    ];
+  }
+  return list.map(toRow).sort((a, b) => b.interest - a.interest || Number(b.new) - Number(a.new));
+}
+async function reconMap(channel: { id: number }) {
+  const cb = callbacks.get(channel.id)!;
+  let index = 0;
+  const send = (message: unknown) => cb({ index: index++, message });
+  const hosts = DROPBOX.filter((r) => r[1] === "in-scope").map((r) => r[0]);
+  const stopAt = mapMode === "running" ? 4 : hosts.length;
+  for (let done = 1; done <= stopAt; done++) {
+    await sleep(150);
+    send({ kind: "progress", done, total: hosts.length, text: hosts[done - 1] });
+  }
+  if (mapMode === "running") return new Promise(() => {});
+  send({ kind: "done", changes: [] });
+  return null;
+}
+if (new URLSearchParams(location.search).get("recon") === "1") {
+  setTimeout(() => {
+    reconExtra = [["files-preview.dropboxbusiness.com", "in-scope", true, true, 200, "File preview", ["Go"], 9, ["upload", "api"]]];
+    emit("bounty-recon-updated", { handle: "intigriti-dropbox" });
+  }, 2000);
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let refreshing = false;
 
@@ -187,6 +242,11 @@ async function bountyRefresh(channel: { id: number }) {
     if (cmd === "lab_status") return current;
     if (cmd === "bounty_ranking") { await sleep(progMode === "loading" ? 60000 : 40); return ranking(); }
     if (cmd === "bounty_refresh") return bountyRefresh(args.onEvent as unknown as { id: number });
+    if (cmd === "bounty_recon_list") { await sleep(60); return reconList(args.handle); }
+    if (cmd === "bounty_recon_map") {
+      if (guard.status !== "active") throw "bounty: guard: no active program (exit 5)";
+      return reconMap(args.onEvent as unknown as { id: number });
+    }
     if (cmd === "bounty_guard_status") return guardStatus();
     if (cmd === "bounty_use") { await sleep(500); guard = gActive(args.handle); return guard; }
     if (cmd === "bounty_guard_stop") { await sleep(300); guard = G0; return null; }

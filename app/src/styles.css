@@ -800,3 +800,89 @@ tr.join .total .tbar {
 .pg-help dt:first-child + dd { display: none; }
 .pg-help dt { white-space: nowrap; color: var(--ink-soft); }
 .pg-help dd { margin: 0; }
+/* ---- Look here (FE-6, CONTRACTS §10): a drawer over the table, one program's hosts ---- */
+.lh {
+  position: fixed;
+  z-index: 20;
+  top: 0; right: 0; bottom: 0;
+  width: min(1040px, 100vw - 96px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 18px 0;
+  background: var(--paper);
+  border-left: 1px solid var(--rule);
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--ink) 28%, transparent);
+}
+.lh[hidden] { display: none; }
+.lh-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.lh-head h2 { margin: 0; font-size: 1.35em; }
+.lh-head .handle { margin-left: 0; }
+.lh-sum { margin: 0 auto 0 8px; color: var(--ink-soft); }
+.lh-map.spinning, .lh-map:disabled { color: var(--ink-soft); }
+.lh-map:not(:disabled) { border-color: var(--cta) !important; color: var(--cta); font-weight: 700; }
+.lh-map-line { margin: 0; padding: 5px 10px; border-radius: 4px; position: relative; overflow: hidden; }
+.lh-map-line[hidden] { display: none; }
+.lh-map-line[data-kind="blocked"] { color: var(--ink-soft); border-left: 3px solid var(--rule); background: var(--field); }
+.lh-map-line[data-kind="error"] { color: var(--stop); border-left: 3px solid var(--stop); background: var(--field); }
+.lh-map-line[data-kind="running"] {
+  border-left: 3px solid var(--cta); font-family: var(--mono); font-size: 0.92em;
+  background: linear-gradient(color-mix(in srgb, var(--cta) 14%, var(--field)), color-mix(in srgb, var(--cta) 14%, var(--field))) 0 0 / calc(var(--p) * 100%) 100% no-repeat, var(--field);
+}
+.lh-open { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 10px; border-radius: 4px; background: var(--field); border-left: 3px solid var(--wait); }
+.lh-open[hidden] { display: none; }
+.lh-open code { font: 700 1em var(--mono); color: var(--ink); }
+.lh-open button { height: 26px !important; }
+.lh-open span { color: var(--ink-soft); }
+.lh-table-wrap { flex: 1; min-height: 0; overflow: auto; background: var(--field); border: 1px solid var(--hair); border-radius: 8px; }
+.lh-table-wrap:focus { outline: none; }
+.lh-table { width: 100%; border-collapse: collapse; }
+.lh-table[hidden] { display: none; }
+.lh-table th, .lh-table td { height: var(--row); padding: 0 8px; border-bottom: 1px solid var(--hair); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lh-table thead th { position: sticky; top: 0; z-index: 1; height: 32px; background: var(--field); border-bottom-color: var(--rule); font-weight: 400; color: var(--ink-soft); font-size: 0.92em; }
+.lh-table .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.lh-table thead .num { font-family: var(--sans); }
+.lh-table tbody tr:hover { background: var(--paper); }
+.lh-table tbody tr.new { background: color-mix(in srgb, var(--go) 7%, var(--field)); }
+.lh-table tbody tr.new td:first-child { box-shadow: inset 3px 0 0 var(--go); }
+.lh-table tbody tr.selected { background: color-mix(in srgb, var(--cta) 12%, var(--field)); }
+.lh-table tbody tr.selected td:first-child { box-shadow: inset 3px 0 0 var(--cta); }
+.lh-table tr.dead td { color: var(--ink-soft); }
+.lh-table tr.out td { color: var(--ink-soft); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--stop) 50%, transparent); }
+.lh-table tr.out .lh-scope { text-decoration: none; display: inline-block; }
+.lh-table .interest { width: 96px; }
+.ibar { display: inline-block; width: 40px; height: 6px; margin-right: 6px; vertical-align: 1px; border-radius: 2px;
+  background: linear-gradient(var(--cta), var(--cta)) 0 0 / calc(var(--w) * 100%) 100% no-repeat, var(--hair); }
+.lh-table .host { max-width: 0; width: 34%; font-family: var(--mono); font-size: 0.95em; }
+.lh-table .host .h { color: var(--ink); }
+.lh-table tr.dead .host .h { color: var(--ink-soft); }
+.lh-new, .lh-scope { margin-left: 8px; padding: 0 5px; border-radius: 4px; font: 700 0.8em / 1.6 var(--sans); }
+.lh-new { color: var(--go); background: color-mix(in srgb, var(--go) 16%, var(--field)); }
+.lh-scope { color: var(--stop); border: 1px solid color-mix(in srgb, var(--stop) 40%, var(--field)); }
+.lh-table .status { width: 52px; }
+.lh-table tr.dead .status { font-family: var(--sans); font-size: 0.9em; }
+.lh-table .status.redir { color: var(--wait); }
+.lh-table .title { max-width: 0; width: 26%; }
+.lh-table .tech { max-width: 0; width: 16%; color: var(--ink-soft); font-size: 0.92em; }
+.lh-table .urls { width: 48px; }
+.lh-table .signals { width: 1%; }
+.sig { display: inline-block; margin-right: 3px; padding: 0 5px; border: 1px solid var(--hair); border-radius: 4px; color: var(--ink-soft); font-size: 0.85em; line-height: 1.5; }
+.sig-login, .sig-admin, .sig-upload, .sig-debug { color: var(--stop); border-color: color-mix(in srgb, var(--stop) 35%, var(--field)); }
+.sig-api, .sig-graphql, .sig-swagger { color: var(--cta); border-color: color-mix(in srgb, var(--cta) 40%, var(--field)); }
+.lh-foot { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 2px 0 10px; color: var(--ink-soft); font-size: 0.9em; }
+.lh-foot kbd + kbd { margin-left: 2px; }
+@media (max-width: 900px) {
+  .lh { width: 100vw; padding-inline: 12px; }
+  .lh-table .tech, .lh-table th.wide { display: none; }
+}
+.lh-head { flex-wrap: nowrap; }
+.lh-head h2, .lh-head button { flex: none; white-space: nowrap; }
+.lh-sum { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lh-head button { display: inline-flex; align-items: center; gap: 8px; }
+.lh-table .host .h { display: inline-block; max-width: calc(100% - 9em); overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+@media (max-width: 720px) { .lh-head { flex-wrap: wrap; } .lh-head .handle { display: none; } }
+.lh-table .host .h { max-width: 100%; }
+.lh-table .host .h:not(:last-child) { max-width: calc(100% - 5em); }
+.lh-table .host .h:not(:nth-last-child(-n+2)) { max-width: calc(100% - 12em); }
+.lh-head .handle { white-space: nowrap; }
+@media (max-width: 1400px) { .lh-head .handle { display: none; } }
