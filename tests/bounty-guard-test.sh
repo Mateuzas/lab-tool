@@ -22,8 +22,10 @@ NETI=kali-bounty-testnet-int
 PORT=18081
 mkdir -p "$ROOT/workspace"
 WS=$(mktemp -d "$ROOT/workspace/.guard-test.XXXXXX")
+VOL=kali-bounty-test-guard
+VAR=/var/lib/bounty-guard
 export BOUNTY_CONTAINER=$C BOUNTY_LAB_CONTAINER=kali-lab-guard-test-none BOUNTY_IMAGE=$IMAGE \
-       BOUNTY_GUARD_PORT=$PORT BOUNTY_WORKSPACE=$WS
+       BOUNTY_GUARD_PORT=$PORT BOUNTY_WORKSPACE=$WS BOUNTY_GUARD_VOLUME=$VOL
 
 fail=0
 check() { if [ "$1" = ok ]; then echo "  PASS: $2"; else echo "  FAIL: $2"; fail=1; fi; }
@@ -32,10 +34,11 @@ expect() { if [ "$1" = "$2" ]; then check ok "$3"; else check bad "$3 (got '$1',
 cleanup() {
   docker rm -f "$C" "$T" >/dev/null 2>&1
   docker network rm "$NET" "$NETI" >/dev/null 2>&1
+  docker volume rm "$VOL" >/dev/null 2>&1
   rm -rf "$WS"
 }
 [ -n "${BOUNTY_TEST_KEEP:-}" ] || trap cleanup EXIT
-cleanup_quiet() { docker rm -f "$C" "$T" >/dev/null 2>&1; docker network rm "$NET" "$NETI" >/dev/null 2>&1; }
+cleanup_quiet() { docker rm -f "$C" "$T" >/dev/null 2>&1; docker network rm "$NET" "$NETI" >/dev/null 2>&1; docker volume rm "$VOL" >/dev/null 2>&1; }
 cleanup_quiet
 
 as_root() { docker exec "$C" "$@"; }
@@ -46,7 +49,7 @@ req() {
     -w '%{http_code} %header{x-bounty-guard}' "$@" 2>/dev/null | sed 's/refused; reason=//'
 }
 body() { local actor=$1; shift; docker exec "$C" bounty-run --actor "$actor" -- curl -s -m 20 "$@" 2>/dev/null; }
-flows() { as_root sh -c "cat /bounty/programs/$1/flows/*.jsonl 2>/dev/null"; }
+flows() { as_root sh -c "cat $VAR/flows/$1/*.jsonl 2>/dev/null"; }
 use() { INTIGRITI_USERNAME=tester host/bounty program use "$1" >/dev/null 2>&1; }
 jget() { python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); print(eval(sys.argv[1]))' "$1"; }
 
@@ -121,7 +124,7 @@ EOF
 cp /bounty/testca/ca.pem /usr/local/share/ca-certificates/guard-test-ca.crt && update-ca-certificates >/dev/null 2>&1'
 # Restart the guard so it reads the trust store with the test CA (upstream verification stays on).
 as_root pkill -9 -u guard; sleep 3
-for _ in $(seq 1 20); do [ "$(as_root cat /bounty/state/guard.json | jget 'd.get("guard")')" = up ] && break; sleep 0.5; done
+for _ in $(seq 1 20); do [ "$(as_root cat $VAR/guard.json | jget 'd.get("guard")')" = up ] && break; sleep 0.5; done
 
 echo "== (a) no profile: everything refused"
 expect "$(req human http://app.acme.test/a)" "403 no-profile" "http to an in-scope-to-be host refused: no-profile"
@@ -137,11 +140,11 @@ env -u INTIGRITI_USERNAME BOUNTY_WORKSPACE="$WS" host/bounty program use test-ac
 expect "$rc" 2 "program use without INTIGRITI_USERNAME (template needs it) exits 2"
 INTIGRITI_USERNAME=tester host/bounty program use test-acme; rc=$?
 expect "$rc" 0 "program use test-acme"
-state() { as_root cat /bounty/state/guard.json | jget "$1"; }
+state() { as_root cat $VAR/guard.json | jget "$1"; }
 wait_state() { for _ in $(seq 1 20); do [ "$(state "$1")" = "$2" ] && return 0; sleep 0.5; done; return 1; }
 wait_state 'd["status"]' active
 expect "$(state '(d["status"], d["program"], d["effective_rps"])')" "('active', 'test-acme', 2.0)" "guard.json: active, program, rate"
-for _ in $(seq 1 20); do eg=$(as_root cat /bounty/state/guard.json | jget 'd.get("egress_ip")'); [ "$eg" != None ] && break; sleep 0.5; done
+for _ in $(seq 1 20); do eg=$(as_root cat $VAR/guard.json | jget 'd.get("egress_ip")'); [ "$eg" != None ] && break; sleep 0.5; done
 expect "$eg" "198.51.100.20" "egress IP looked up through the (stubbed) recon source"
 [ "$eg" = "198.51.100.20" ] || echo "  egress_error: $(state 'd.get("egress_error")')"
 
@@ -276,12 +279,12 @@ chk e1 human refused "'host-mismatch'"
 chk f1 human refused "'internal-address'"
 chk i1 claude allowed None
 chk i2 "tool:mytool" allowed None
-fl0=$(as_root sh -c 'cat /bounty/state/flows/*.jsonl 2>/dev/null')
-expect "$(echo "$fl0" | grep -c '"no-profile"')" 3 "no-profile refusals logged (state/flows, program null)"
+fl0=$(flows _none)
+expect "$(echo "$fl0" | grep -c '"no-profile"')" 3 "no-profile refusals logged (flows/_none, program null)"
 line=$(echo "$fl" | grep '/b2"' | head -1)
 expect "$(echo "$line" | jget 'sorted(d)')" "['actor', 'category', 'decision', 'egress_ip', 'flow_id', 'host', 'ip', 'method', 'ms', 'program', 'reason', 'req_bytes', 'resp_bytes', 'status', 'ts', 'url']" "flow log line has the CONTRACTS §5 fields"
 expect "$(echo "$line" | jget '(d["ip"], d["egress_ip"], d["category"])')" "('203.0.113.10', '198.51.100.20', 'target')" "flow log: ip, egress_ip, category"
-mitm=$(as_root sh -c 'cat /bounty/programs/test-acme/flows/*.mitm | wc -c')
+mitm=$(as_root sh -c "cat $VAR/flows/test-acme/*.mitm | wc -c")
 [ "$mitm" -gt 1000 ] && check ok ".mitm flow file written ($mitm bytes)" || check bad ".mitm flow file written"
 leaks=$(docker exec "$T" python3 -c '
 import json
@@ -306,7 +309,7 @@ fl=$(flows test-acme)
 expect "$(echo "$fl" | grep '"rate-limited"' | grep -c '/h[0-9]*"')" "$limited" "rate-limited refusals are in the flow log"
 
 echo "== (k) guard killed: nothing leaves until the supervisor restarts it"
-r0=$(as_root cat /bounty/state/guard.json | jget 'd["guard_restarts"]')
+r0=$(as_root cat $VAR/guard.json | jget 'd["guard_restarts"]')
 as_root pkill -9 -u guard
 out=$(req human https://app.acme.test/k1)
 expect "${out%% *}" "000" "proxy request fails while the guard is down"
@@ -318,14 +321,14 @@ for _ in $(seq 1 30); do
   sleep 0.5
 done
 expect "$back" yes "guard back within 15 s, traffic flows again (same profile, from tmpfs)"
-r1=$(as_root cat /bounty/state/guard.json | jget 'd["guard_restarts"]')
+r1=$(as_root cat $VAR/guard.json | jget 'd["guard_restarts"]')
 [ "$r1" -gt "$r0" ] && check ok "guard.json counts the restart ($r0 -> $r1)" || check bad "guard.json counts the restart"
 
 echo "== (k2) firewall tampered: guard stopped, rules restored"
 as_root iptables -I OUTPUT 1 -j ACCEPT
 for _ in $(seq 1 20); do as_root bounty-firewall check && break; sleep 0.5; done
 as_root bounty-firewall check && check ok "supervisor re-locked the firewall" || check bad "supervisor re-locked the firewall"
-grep -q "firewall changed: guard stopped" "$WS/state/guard-events.log" 2>/dev/null || as_root grep -q "firewall changed: guard stopped" /bounty/state/guard-events.log \
+as_root grep -q "firewall changed: guard stopped" $VAR/guard-events.log \
   && check ok "guard was stopped while the rules were wrong" || check bad "guard was stopped while the rules were wrong"
 for _ in $(seq 1 30); do [ "$(req human https://app.acme.test/k4 | cut -d' ' -f1)" = 200 ] && break; sleep 0.5; done
 
@@ -368,6 +371,44 @@ expect "$got" "200 " "fixed profile picked up again, username kept from program 
 echo_json=$(body human https://app.acme.test/n6)
 expect "$(echo "$echo_json" | jget '{k.lower(): v for k, v in d["headers"].items()}.get("x-intigriti-username")')" "tester" "header still filled after automatic reloads"
 
+echo "== (o) nothing inside kali-bounty can change policy or evidence"
+day=$(date -u +%Y%m%d)
+try_as() {  # actor, shell snippet -> ok | denied
+  docker exec "$C" bounty-run --actor "$1" -- bash -c "$2" >/dev/null 2>&1 && echo ok || echo denied
+}
+for actor in human claude; do
+  expect "$(try_as $actor 'echo x >> /bounty/programs/test-acme/program.json')" denied "$actor: write program.json"
+  expect "$(try_as $actor 'echo test-acme-int > /bounty/active')" denied "$actor: write /bounty/active"
+  expect "$(try_as $actor 'echo {} > /bounty/config/recon-sources.json')" denied "$actor: write config/recon-sources.json"
+  expect "$(try_as $actor 'mv /bounty/programs/test-acme /bounty/programs/x')" denied "$actor: rename a program folder"
+  expect "$(try_as $actor "echo x >> $VAR/flows/test-acme/$day.jsonl")" denied "$actor: append to the flow log"
+  expect "$(try_as $actor "echo x >> $VAR/guard.json")" denied "$actor: write guard.json"
+  expect "$(try_as $actor "cat $VAR/ca/mitmproxy-ca.pem")" denied "$actor: read the CA key"
+  expect "$(try_as $actor "echo x >> $VAR/ca/mitmproxy-ca.pem")" denied "$actor: write the CA key"
+  expect "$(try_as $actor 'cat /dev/shm/bounty-guard-run/conf/mitmproxy-ca.pem')" denied "$actor: read the guard's tmpfs CA copy"
+  expect "$(try_as $actor 'cat /dev/shm/bounty-guard/policy.json')" denied "$actor: read the policy snapshot (holds the username)"
+  expect "$(try_as $actor 'echo {} > /dev/shm/bounty-guard/policy.json')" denied "$actor: write the policy snapshot"
+  expect "$(try_as $actor 'echo x > recon/out-$RANDOM.txt && pwd | grep -qx /bounty/work/test-acme')" ok "$actor: writes its output in /bounty/work/test-acme/recon"
+done
+expect "$(as_root stat -c '%U:%G %a' /dev/shm/bounty-guard /dev/shm/bounty-guard/policy.json | tr '\n' ' ')" \
+       "root:guard 750 root:guard 640 " "policy snapshot root-owned, not writable by hunter"
+expect "$(as_root stat -c '%U:%G %a' $VAR $VAR/ca/mitmproxy-ca.pem $VAR/flows | tr '\n' ' ')" \
+       "root:guard 750 guard:guard 400 guard:guard 750 " "volume: root:guard 0750, CA key guard-only, flows guard-owned"
+expect "$(as_root sh -c 'grep -c "PRIVATE KEY" /usr/local/share/ca-certificates/bounty-guard-ca.crt /etc/ssl/certs/ca-certificates.crt' | tr '\n' ' ')" \
+       "/usr/local/share/ca-certificates/bounty-guard-ca.crt:0 /etc/ssl/certs/ca-certificates.crt:0 " "trust store has the CA certificate only, no key"
+expect "$(docker port "$C" | tr '\n' ' ')" "8080/tcp -> 127.0.0.1:$PORT " "only 8080 published (127.0.0.1); claude port 8082 is not"
+expect "$(docker exec "$C" bounty-run --actor human -- curl -s -x http://127.0.0.1:8082 -o /dev/null -w '%{http_code}' -m 20 https://app.acme.test/o-claudeport 2>/dev/null)" \
+       "200" "claude port 8082 works inside the container"
+sleep 1
+expect "$(flows test-acme | grep '/o-claudeport"' | jget 'd["actor"]')" claude "traffic on 8082 logged as claude"
+out=$(host/bounty flows --handle test-acme --tail 500 --json | jget 'sum(1 for r in d if r["url"].endswith("/b2"))')
+expect "$out" 1 "host/bounty flows --json reads the flow log via docker exec"
+host/bounty flows --handle test-acme --tail 3 | grep -q "https://" && check ok "host/bounty flows (text)" || check bad "host/bounty flows (text)"
+exp="$WS/export"
+host/bounty flows export test-acme "$exp" >/dev/null 2>&1
+ls "$exp"/test-acme-flows-*/"$day".jsonl "$exp"/test-acme-flows-*/"$day".mitm >/dev/null 2>&1 \
+  && check ok "host/bounty flows export copies .jsonl + .mitm to a Mac folder" || check bad "host/bounty flows export copies .jsonl + .mitm to a Mac folder"
+
 echo "== (l) rate_limit_rps 0: only human traffic"
 use test-acme-norate
 expect "$(req human https://app.acme.test/l1)" "200 " "human (terminal, Burp) allowed"
@@ -380,8 +421,8 @@ docker exec "$C" bounty-run --actor claude -- ffuf -u https://app.acme.test/FUZZ
 expect "$rc" 6 "bounty-run --actor claude with an active tool exits 6"
 
 echo "== (m) a profile that breaks while active: refuse all and say why"
-as_root sh -c 'echo test-broken > /bounty/active'
-as_root bounty-ctl reload >/dev/null 2>&1; rc=$?
+echo test-broken > "$WS/active"
+as_root bounty-ctl reload --expect test-broken >/dev/null 2>&1; rc=$?
 expect "$rc" 4 "bounty-ctl reload of a broken profile exits 4"
 out=$(body human https://app.acme.test/m1)
 case "$out" in *"no active program"*"not valid JSON"*) check ok "refused no-profile, body says why";;
@@ -392,6 +433,12 @@ expect "$(state 'd["status"]')" "error" "guard.json status error"
 [ -n "${BOUNTY_TEST_KEEP:-}" ] && { echo "kept $C, $T, $WS"; exit $fail; }
 echo "== guard stop"
 host/bounty guard stop >/dev/null && ! docker inspect "$C" >/dev/null 2>&1 && [ -d "$WS/programs" ] \
-  && check ok "guard stop removes the container, keeps the workspace" || check bad "guard stop removes the container, keeps the workspace"
+  && docker volume inspect "$VOL" >/dev/null 2>&1 \
+  && check ok "guard stop removes the container, keeps the workspace and the flows volume" \
+  || check bad "guard stop removes the container, keeps the workspace and the flows volume"
+host/bounty guard stop --purge >/dev/null 2>&1; rc=$?
+expect "$rc:$(docker volume inspect "$VOL" >/dev/null 2>&1 && echo kept)" "64:kept" "guard stop --purge without --yes refuses"
+host/bounty guard stop --purge --yes >/dev/null 2>&1
+docker volume inspect "$VOL" >/dev/null 2>&1 && check bad "guard stop --purge --yes removes the volume" || check ok "guard stop --purge --yes removes the volume"
 
 [ $fail -eq 0 ] && echo "ALL PASS" || { echo "SOME CHECKS FAILED"; exit 1; }

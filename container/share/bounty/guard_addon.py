@@ -1,9 +1,10 @@
 """bounty-guard: mitmproxy addon that enforces the active program profile (ADR 005, CONTRACTS §3, §5).
 
 Runs inside mitmdump as uid `guard` (the only uid iptables lets open outbound connections).
-Policy comes only from the snapshot bounty-ctl writes to tmpfs at `program use` time, never from
-the shared /bounty folder directly (anything in /bounty can be written by the hunter uid, because
-Docker Desktop's file sharing ignores Unix permissions).
+Policy comes only from the snapshot bounty-ctl writes to tmpfs (root-owned) at reload time. Flows
+go to the guard's own Docker volume /var/lib/bounty-guard/flows/<handle>/, which hunter can neither
+read nor write (the /bounty bind mount is read-only; Docker Desktop's file sharing would not
+enforce permissions there).
 
 Every request is decided in `request` (CONTRACTS §3.1). `server_connect` is a second, independent
 gate: mitmproxy only opens an upstream connection to a host the current policy allows, to the exact
@@ -30,7 +31,8 @@ from mitmproxy import io as mio  # noqa: E402
 
 SNAPSHOT = os.environ.get("BOUNTY_SNAPSHOT", "/dev/shm/bounty-guard/policy.json")
 RUN_DIR = os.environ.get("BOUNTY_RUN_DIR", "/dev/shm/bounty-guard-run")
-ROOT = os.environ.get("BOUNTY_ROOT", "/bounty")
+FLOWS = os.environ.get("BOUNTY_FLOWS", "/var/lib/bounty-guard/flows")
+NO_PROFILE = "_none"   # flows refused while no program was active
 CLAUDE_PORT = int(os.environ.get("BOUNTY_CLAUDE_PORT", "8082"))
 DNS_TTL = 30.0
 
@@ -331,10 +333,9 @@ class BountyGuard(object):
             self.counts["allowed"] += 1
         day = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
         prog = rec["program"]
-        base = (os.path.join(ROOT, "programs", prog, "flows") if prog and gp.HANDLE_RE.match(prog)
-                else os.path.join(ROOT, "state", "flows"))
+        base = os.path.join(FLOWS, prog if prog and gp.HANDLE_RE.match(prog) else NO_PROFILE)
         try:
-            os.makedirs(base, exist_ok=True)
+            os.makedirs(base, mode=0o750, exist_ok=True)
             with open(os.path.join(base, day + ".jsonl"), "a") as f:
                 f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             with open(os.path.join(base, day + ".mitm"), "ab") as f:
