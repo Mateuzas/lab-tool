@@ -29,7 +29,11 @@ def build_parser():
     progs = sub.add_parser("programs", help="program intake and ranking")
     ps = progs.add_subparsers(dest="cmd")
     s = ps.add_parser("sync", help="list + detail for open programs + new activities")
-    s.add_argument("--handle", help="sync one program (handle, API handle or id)")
+    s.add_argument("--handle", help="sync one program (handle, API handle or id); always fetches its detail")
+    s.add_argument("--full", action="store_true",
+                   help="fetch every open program's detail (default: only new/changed/stale ones)")
+    st = ps.add_parser("status", help="last sync time and program counts")
+    st.add_argument("--json", action="store_true")
     lst = ps.add_parser("list", help="table of synced programs")
     lst.add_argument("--filter", default=None,
                      help="case-insensitive text matched against handle, name, industry, status, "
@@ -42,6 +46,8 @@ def build_parser():
     r.add_argument("--include-join", action="store_true")
     c = ps.add_parser("changes", help="diff of the last two syncs -> history.jsonl")
     c.add_argument("--since", help="compare with the state at this time (YYYYMMDDTHHMMSSZ or ISO 8601)")
+    c.add_argument("--json", action="store_true",
+                   help='print [{"ts","handle","kind","detail"}] (exit 1 and [] when nothing changed)')
     return p
 
 
@@ -52,21 +58,50 @@ def _scrub(text):
     return text
 
 
+def _err(line):
+    sys.stderr.write("bounty: " + line + "\n")
+    sys.stderr.flush()  # progress lines are read live by the app (CONTRACTS §9)
+
+
 def cmd_sync(args, ws):
     token = os.environ.get(TOKEN_ENV)
     if not token:
         raise BountyError("auth", "INTIGRITI_TOKEN not set (run via scripts/secrets.sh exec intigriti"
                                   " -- host/bounty …)", 2)
-    client = Client(token, log=lambda m: sys.stderr.write("bounty: " + m + "\n"))
-    idx = sync_mod.run(client, ws, handle=args.handle,
-                       log=lambda m: sys.stderr.write("bounty: " + m + "\n"))
+    client = Client(token, log=_err)
+    idx = sync_mod.run(client, ws, handle=args.handle, log=_err, full=args.full)
     c = idx["counts"]
-    print("synced %d programs (%d open: %d ok, %d needs-join, %d errors); %d new activities; "
-          "%d requests; index sync/%s.json" % (c["programs"], c["open"], c["detail_ok"], c["needs_join"],
-                                               c["detail_errors"], c["activities_new"], idx["requests"],
-                                               idx["ts"]))
+    print("synced %d programs (%d open: %d ok, %d needs-join, %d errors); %d details fetched (%s); "
+          "%d new activities; %d requests; index sync/%s.json"
+          % (c["programs"], c["open"], c["detail_ok"], c["needs_join"], c["detail_errors"],
+             c["details_planned"], idx["mode"], c["activities_new"], idx["requests"], idx["ts"]))
     for e in idx["errors"]:
         sys.stderr.write("bounty: %s: %s: %s\n" % (e["code"], e["handle"], e["message"]))
+    return 0
+
+
+def status(ws):
+    """CONTRACTS §9 Ranking.status: last complete (not --handle) sync and program counts."""
+    store = Store(ws)
+    last = None
+    for ts in reversed(store.sync_timestamps()):
+        idx = store.sync_index(ts) or {}
+        if not idx.get("partial"):
+            last = idx.get("synced_at")
+            break
+    progs = store.programs()
+    open_ = [p for p in progs if p.get("status") == "open"]
+    return {"last_sync_at": last, "programs": len(progs), "open": len(open_),
+            "needs_join": sum(1 for p in open_ if p.get("detail") == "needs-join")}
+
+
+def cmd_status(args, ws):
+    st = status(ws)
+    if args.json:
+        print(json.dumps(st, indent=2))
+        return 0
+    print("last sync: %s" % (st["last_sync_at"] or "never (run programs sync)"))
+    print("%d programs, %d open, %d need joining to see scope" % (st["programs"], st["open"], st["needs_join"]))
     return 0
 
 
@@ -125,6 +160,10 @@ def cmd_rank(args, ws):
 def cmd_changes(args, ws):
     since = parse_time(args.since) if args.since else None
     events, msg = changes_mod.run(ws, since)
+    if args.json:
+        print(json.dumps([{"ts": rec["ts"], "handle": h, "kind": rec["kind"], "detail": rec["detail"]}
+                          for h, rec in events], indent=2, ensure_ascii=False))
+        return 0 if events else 1
     if not events:
         print(msg)
         return 1
@@ -138,7 +177,7 @@ def main(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
     ws = workspace_dir()
-    handlers = {"sync": cmd_sync, "list": cmd_list, "rank": cmd_rank, "changes": cmd_changes}
+    handlers = {"sync": cmd_sync, "status": cmd_status, "list": cmd_list, "rank": cmd_rank, "changes": cmd_changes}
     if args.group != "programs" or getattr(args, "cmd", None) not in handlers:
         parser.print_help(sys.stderr)
         return 64
@@ -147,6 +186,12 @@ def main(argv=None):
     except BountyError as e:
         sys.stderr.write("bounty: %s: %s\n" % (e.code, _scrub(e.message)))
         return e.exit_code
+    except BrokenPipeError:  # `... --json | head`: the reader went away, not an error of ours
+        try:
+            sys.stdout = open(os.devnull, "w")
+        except OSError:
+            pass
+        return 0
     except KeyboardInterrupt:
         sys.stderr.write("bounty: interrupted\n")
         return 130

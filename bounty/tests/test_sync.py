@@ -135,7 +135,8 @@ class TestSync(unittest.TestCase):
         idx = sync.run(make_client(api), self.ws, now=NOW, log=lambda m: None)
         self.assertEqual(idx["ts"], "20261113T120000Z")
         self.assertEqual(idx["counts"], {"programs": 3, "open": 2, "detail_ok": 1, "needs_join": 1,
-                                         "detail_errors": 0, "not_fetched": 1, "activities_new": 3})
+                                         "detail_errors": 0, "not_fetched": 1, "detail_kept": 0,
+                                         "activities_new": 3, "details_planned": 2})
         self.assertIn("/v1/programs?limit=500&offset=2", api.calls)
         self.assertNotIn("/v1/programs/p-c", api.calls)  # suspended: no detail request
         P = lambda h: read_json(os.path.join(self.ws, "programs", h, "program.json"))
