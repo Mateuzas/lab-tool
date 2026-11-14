@@ -159,7 +159,7 @@ class TestOutput(unittest.TestCase):
         res = R.score(progs, W, NOW)
         data = json.loads(json.dumps(R.to_json(res)))
         self.assertEqual([d["handle"] for d in data], ["intigriti-a", "intigriti-b", "intigriti-c"])
-        self.assertEqual(set(data[0]), {"handle", "total", "factors", "inputs", "flags", "excluded"})
+        self.assertEqual(set(data[0]), {"handle", "name", "url", "total", "factors", "inputs", "flags", "excluded"})
         self.assertEqual(set(data[0]["factors"]), {"payout", "findability", "competition", "friction"})
         self.assertEqual(data[2]["excluded"], "no-bounty")
         text = R.render_table(res)

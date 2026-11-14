@@ -1,5 +1,12 @@
-"""`programs sync` (BE-2, CONTRACTS §6): list + detail for open programs + new activities."""
+"""`programs sync` (BE-2, BE-12, CONTRACTS §6, §9): list + new activities + detail for open programs.
 
+Incremental by default: the detail is fetched only for open programs that need it (see
+`detail_reason`); `full=True` fetches every open program's detail. Progress goes to `log` as
+`progress: <done>/<total> <handle>`, one line per detail request (`progress: 0/0 up to date` when
+none is needed).
+"""
+
+import datetime
 import os
 import sys
 
@@ -10,6 +17,8 @@ from bounty.util import (BountyError, append_jsonl, dumps, iso, iso_from_unix, r
                          utcnow, write_bytes, write_json)
 
 PAGE = 500
+DETAIL_MAX_AGE = datetime.timedelta(days=7)
+DETAIL_ACTIVITY_TYPES = ("domains", "rules", "status")  # activity type values that mean "re-fetch"
 
 
 def activity_key(rec):
@@ -107,7 +116,44 @@ def _match(record, handle_arg, assigned):
                  "intigriti-" + (record.get("handle") or "").lower(), str(record.get("id")))
 
 
-def run(client, ws, handle=None, now=None, log=None):
+def _list_view(record, fx):
+    """The list-record fields whose change triggers a detail re-fetch (as program.json stores them)."""
+    b = normalise.bounty(record, fx)
+    conf = (normalise._value(record.get("confidentialityLevel")) or "").strip().lower()
+    return {"status": (normalise._value(record.get("status")) or "").strip().lower() or None,
+            "confidentiality": normalise.CONF_MAP.get(conf, conf or None),
+            "bounty": (b["min"], b["max"], b["currency"])}
+
+
+def _activity_triggers(act):
+    v = (normalise._value(act.get("type")) or "").lower()
+    return any(w in v for w in DETAIL_ACTIVITY_TYPES)
+
+
+def detail_reason(record, prev, fx, last_detail, now, new_act_pids):
+    """Why this open program needs its detail fetched in an incremental sync, or None (CONTRACTS §9).
+
+    prev: the program.json from the last sync ({} if none); last_detail: datetime of the newest
+    stored detail response (200 or 403) or None; new_act_pids: program ids with a new domains,
+    rules or status activity since the last sync.
+    """
+    if not prev:
+        return "new"
+    cur = _list_view(record, fx)
+    pb = prev.get("bounty") or {}
+    if (cur["status"] != prev.get("status") or cur["confidentiality"] != prev.get("confidentiality")
+            or cur["bounty"] != (pb.get("min"), pb.get("max"), pb.get("currency"))):
+        return "list-changed"
+    if record.get("id") in new_act_pids:
+        return "activity"
+    if prev.get("detail") not in ("ok", "needs-join") or last_detail is None:
+        return "no-detail"
+    if now - last_detail > DETAIL_MAX_AGE:
+        return "stale"
+    return None
+
+
+def run(client, ws, handle=None, now=None, log=None, full=False):
     log = log or (lambda m: sys.stderr.write(m + "\n"))
     now = now or utcnow()
     ts = ts_name(now)
@@ -133,21 +179,40 @@ def run(client, ws, handle=None, now=None, log=None):
     new_acts = fetch_new_activities(client, known)
     append_jsonl(store.activities_path(), new_acts)
     firsts = first_seen(known_acts + new_acts)
+    act_pids = set(a.get("programId") for a in new_acts if _activity_triggers(a))
+
+    # Plan: which open programs get a detail request this run.
+    prevs, plan = {}, {}
+    for r in records:
+        h = assigned[r.get("id")]
+        prevs[h] = read_json(store.program_path(h)) or {}
+        if (normalise._value(r.get("status")) or "").lower() != "open":
+            continue
+        if full or handle:
+            plan[h] = "full"
+            continue
+        why = detail_reason(r, prevs[h], fx, store.last_detail_time(h), now, act_pids)
+        if why:
+            plan[h] = why
+    total = len(plan)
+    if total == 0:
+        log("progress: 0/0 up to date")
 
     counts = {"programs": len(records), "open": 0, "detail_ok": 0, "needs_join": 0,
-              "detail_errors": 0, "not_fetched": 0, "activities_new": len(new_acts)}
+              "detail_errors": 0, "not_fetched": 0, "detail_kept": 0, "activities_new": len(new_acts)}
+    counts["details_planned"] = total
     errors, handles = [], []
-    open_total = sum(1 for r in records if (normalise._value(r.get("status")) or "").lower() == "open")
     done = 0
     for r in records:
         h = assigned[r.get("id")]
         raw = store.raw_dir(h, ts)
         write_json(os.path.join(raw, "list.json"), r)
-        prev = read_json(store.program_path(h)) or {}
+        prev = prevs[h]
         status = (normalise._value(r.get("status")) or "").lower()
         detail, state = None, "not-fetched"
         if status == "open":
             counts["open"] += 1
+        if h in plan:
             done += 1
             try:
                 resp = client.program_detail(r.get("id"))
@@ -176,8 +241,7 @@ def run(client, ws, handle=None, now=None, log=None):
                 else:
                     state = "error"
                     errors.append({"handle": h, "code": "api", "message": "detail HTTP %d" % resp.status})
-            if done % 20 == 0 or done == open_total:
-                log("detail %d/%d" % (done, open_total))
+            log("progress: %d/%d %s" % (done, total, h))
         fs = firsts.get(r.get("id"))
         try:
             prog = normalise.program(h, r, detail, state, fx, synced_at, iso_from_unix(fs), prev)
@@ -185,6 +249,9 @@ def run(client, ws, handle=None, now=None, log=None):
             errors.append({"handle": h, "code": "parse", "message": "normalise: %s" % type(e).__name__})
             prog = normalise.program(h, r, None, "error", fx, synced_at, iso_from_unix(fs), prev)
             state = "error"
+        if state == "not-fetched" and status == "open":
+            counts["detail_kept"] += 1
+            state = prog["detail"] if prog["detail"] in ("ok", "needs-join") else state
         key = {"ok": "detail_ok", "needs-join": "needs_join", "error": "detail_errors",
                "not-fetched": "not_fetched"}[state]
         counts[key] += 1
@@ -198,6 +265,8 @@ def run(client, ws, handle=None, now=None, log=None):
         "synced_at": synced_at,
         "finished_at": iso(utcnow()),
         "partial": bool(handle),
+        "mode": "full" if (full or handle) else "incremental",
+        "detail_fetched": sorted(plan),
         "handles": sorted(handles),
         "counts": counts,
         "requests": client.requests,

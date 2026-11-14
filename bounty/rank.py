@@ -122,7 +122,7 @@ def score(programs, weights, now, include_no_bounty=False, include_join=False):
         if p.get("status") != "open":
             continue
         inp = inputs(p, now)
-        rows.append({"handle": p.get("handle"), "name": p.get("name"), "inputs": inp,
+        rows.append({"handle": p.get("handle"), "name": p.get("name"), "url": p.get("url"), "inputs": inp,
                      "excluded": exclusion(inp, include_no_bounty)})
     ranked = [r for r in rows if r["excluded"] is None]
     pr_pay = percentile_ranker([_payout_base(r["inputs"]) for r in ranked])
@@ -203,6 +203,8 @@ def to_json(results):
             inp[k] = _r4(inp[k])
         out.append({
             "handle": r["handle"],
+            "name": r.get("name"),
+            "url": r.get("url"),
             "total": _r4(r["total"]),
             "factors": {k: _r4(v) for k, v in r["factors"].items()},
             "inputs": inp,

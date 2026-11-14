@@ -1,5 +1,6 @@
 """Workspace layout (CONTRACTS §1) for programs, activities, syncs and snapshots."""
 
+import datetime
 import glob
 import os
 
@@ -58,3 +59,24 @@ class Store(object):
 
     def activities(self):
         return read_jsonl(self.activities_path())
+
+    def last_detail_time(self, handle):
+        """When the newest stored detail response (detail.json or detail-<status>.txt) was fetched:
+        the UTC datetime of its raw/<ts>/ folder, or None if there is none."""
+        best = None
+        for d in glob.glob(os.path.join(self.program_dir(handle), "raw", "*")):
+            ts = os.path.basename(d)
+            if best is not None and ts <= best:
+                continue
+            try:
+                names = os.listdir(d)
+            except OSError:
+                continue
+            if any(n == "detail.json" or (n.startswith("detail-") and n.endswith(".txt")) for n in names):
+                best = ts
+        if best is None:
+            return None
+        try:
+            return datetime.datetime.strptime(best, "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            return None
