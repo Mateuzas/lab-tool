@@ -693,6 +693,8 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "J": mixJoin = !mixJoin; render(); break;
       case "u": if (selected) void guard.use(selected); break;
       case "b": void guard.burp(); break;
+      case "t": void guard.shell(); break;
+      case "h": void guard.hunter(); break;
       case "g": void guard.stop(); break;
       case "a": void cycleApplication(); break;
       case "?": toggleHelp(true); break;

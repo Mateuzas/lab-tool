@@ -188,6 +188,8 @@
             <ol id="pg-refusals-items"></ol>
           </section>
         </div>
+        <button type="button" class="pg-toggle pg-work" id="pg-shell" aria-keyshortcuts="t" aria-disabled="true">Shell <kbd>t</kbd></button>
+        <button type="button" class="pg-toggle pg-work" id="pg-hunter" aria-keyshortcuts="h" aria-disabled="true">Claude <kbd>h</kbd></button>
         <button type="button" class="pg-toggle" id="pg-burp" aria-keyshortcuts="b">Burp <kbd>b</kbd></button>
         <button type="button" class="pg-toggle" id="pg-guard-stop" aria-keyshortcuts="g">Stop guard <kbd>g</kbd></button>
         <button type="button" class="pg-refresh" id="pg-refresh" aria-keyshortcuts="r">Refresh <kbd>r</kbd></button>
@@ -231,7 +233,7 @@
         <p class="pg-keys" aria-label="Keyboard shortcuts">
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
-          <span><kbd>u</kbd> use program</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
+          <span><kbd>u</kbd> use program</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
           <span><kbd>?</kbd> all keys</span>
         </p>
         <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
@@ -265,6 +267,8 @@
             <dl>
               <dt>Scope guard</dt><dd></dd>
               <dt><kbd>u</kbd></dt><dd>Use the selected program or manual target</dd>
+              <dt><kbd>t</kbd></dt><dd>Terminal shell in the guard container</dd>
+              <dt><kbd>h</kbd></dt><dd>Claude copilot for the active program</dd>
               <dt><kbd>b</kbd></dt><dd>Open Burp through the guard</dd>
               <dt><kbd>g</kbd></dt><dd>Stop the guard</dd>
               <dt><kbd>R</kbd></dt><dd>Requests the guard refused</dd>
