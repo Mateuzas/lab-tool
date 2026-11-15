@@ -81,6 +81,11 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | BE-7 | Backender | `hunter/` Claude copilot (see slice 2) | todo |
 | BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
 
+| BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | in progress |
+| BE-14b | Backender | Sync hygiene: snapshots only on change, needs-join re-check daily (§11.2) | in progress |
+| BE-23 | Backender | Manual handles in the Tauri commands + `bounty_manual_list` + `program-closed`/`program-reopened` kinds (§10.5, §11.3) | in progress |
+| FE-7 | Frontender | `a` key application state in the join list, Manual targets section, `?` shortcut overlay (§11) | in progress |
+| OPS-5 | DevOps | `make app-install` copies the built app to /Applications; `.DS_Store` ignored | in progress |
 | BE-22 | Backender | Manual targets: `host/bounty manual add`, `legal_basis: authorization`, excluded from sync/rank/changes (CONTRACTS §2.1, ADR 010) | done |
 
 ## Later (in rough order, re-planned after each hunting session)
