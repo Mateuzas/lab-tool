@@ -41,6 +41,7 @@ class TestApplyState(unittest.TestCase):
         self.assertEqual(data[self.h]["note"], "sent CV")
         self.assertEqual(self.cli(["program", "apply-state", self.h, "none"])[0], 0)
         self.assertNotIn(self.h, read_json(applications.path(self.ws)))
+        self.assertEqual(self.cli(["program", "apply-state", self.h, "none"])[0], 0)  # nothing to clear
         self.assertEqual(self.cli(["program", "apply-state", self.h, "maybe"])[0], 64)
         self.assertEqual(self.cli(["program", "apply-state", "intigriti-nope", "applied"])[0], 64)
 
