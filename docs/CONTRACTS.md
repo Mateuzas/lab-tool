@@ -90,7 +90,7 @@ Built from the API (docs/research/intigriti-api.md). `raw/` keeps the responses 
     "ai_use": "allowed-disclosed",           // platform Code of Conduct default; "forbidden" if the rules text says so (manual tag)
     "text": "<rules of engagement markdown>"
   },
-  "legal_basis": "program"                   // program | lt-article-25 (ADR 008)
+  "legal_basis": "program"                   // program | lt-article-25 (ADR 008) | authorization (ADR 010, manual targets)
 }
 ```
 
@@ -102,6 +102,18 @@ Currency → EUR with fixed rates from `config/ranking.json` (`fx`), not live ra
 Enforceable by the guard: `wildcard` (`*.example.com` matches subdomains at any depth, **not** the
 apex), `domain` (exact host), `url` (scheme + host + path prefix), `cidr`. The rest are shown only.
 `{Username}` in templates is replaced with `INTIGRITI_USERNAME` at `program use` time.
+
+## 2.1 Manual targets (ADR 010)
+
+A system you were **authorised by its owner** to test directly, outside any platform.
+`host/bounty manual add "<name>" --scope <entry>... [--out <entry>...] [--rate <rps>]
+[--header 'Name: value'] [--authorized-by <who>] [--auth-note <path>] [--expires <date>]` writes a
+profile at `programs/manual-<slug>/program.json` with `platform: "manual"`, `legal_basis:
+"authorization"` and an `authorization` object `{owner, note_path, granted_at, expires}`. The guard
+enforces it exactly like a platform profile (it reads scope and rules, not `legal_basis`). `sync`,
+`rank`, `changes` and the notifier ignore manual targets (`platform != "intigriti"`, no
+`platform_id`). Activate with `host/bounty guard start && host/bounty program use manual-<slug>`;
+the app's `u` key is Intigriti-only, so manual targets are driven from the CLI for now.
 
 ## 3. Scope guard
 

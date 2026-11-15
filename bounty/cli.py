@@ -7,6 +7,7 @@ import sys
 
 from bounty import changes as changes_mod
 from bounty import guard as guard_mod
+from bounty import manual as manual_mod
 from bounty import rank as rank_mod
 from bounty import sync as sync_mod
 from bounty.config import load_ranking
@@ -69,6 +70,20 @@ def build_parser():
     u = prs.add_parser("use", help="make a program the guard's active profile "
                                    "(run via scripts/secrets.sh exec intigriti -- for INTIGRITI_USERNAME)")
     u.add_argument("handle")
+    man = sub.add_parser("manual", help="a target you were authorised to test directly (not a platform program)")
+    ms = man.add_subparsers(dest="cmd")
+    ma = ms.add_parser("add", help="create a manual target profile the guard can enforce")
+    ma.add_argument("name", help="a label, e.g. \"Friend's site\"; the handle becomes manual-<slug>")
+    ma.add_argument("--scope", action="append", metavar="ENTRY",
+                    help="in-scope: *.example.com, example.com, https://example.com/app, or a CIDR (repeatable)")
+    ma.add_argument("--out", action="append", metavar="ENTRY", help="out-of-scope entry (repeatable)")
+    ma.add_argument("--rate", type=float, default=5.0, metavar="RPS",
+                    help="max requests/second (default 5; 0 = no automated tools)")
+    ma.add_argument("--header", help="a required request header, 'Name: value'")
+    ma.add_argument("--authorized-by", help="who owns the system and authorised the test")
+    ma.add_argument("--auth-note", metavar="PATH", help="path to the written authorisation (kept, not copied)")
+    ma.add_argument("--expires", help="date the authorisation ends, e.g. 2026-12-31")
+    ma.add_argument("--force", action="store_true", help="overwrite an existing manual target")
     return p
 
 
@@ -110,10 +125,16 @@ def status(ws):
         if not idx.get("partial"):
             last = idx.get("synced_at")
             break
-    progs = store.programs()
+    progs = _intigriti(store.programs())
     open_ = [p for p in progs if p.get("status") == "open"]
     return {"last_sync_at": last, "programs": len(progs), "open": len(open_),
             "needs_join": sum(1 for p in open_ if p.get("detail") == "needs-join")}
+
+
+def _intigriti(progs):
+    """Ranking, counts and the Intigriti sync ignore manual targets (CONTRACTS §2, legal_basis
+    "authorization"): a manual profile has no platform_id and is never sent to the API."""
+    return [p for p in progs if (p.get("platform") or "intigriti") == "intigriti"]
 
 
 def cmd_status(args, ws):
@@ -152,7 +173,7 @@ def cmd_list(args, ws):
 
 def cmd_rank(args, ws):
     cfg = load_ranking(ws)
-    progs = Store(ws).programs()
+    progs = _intigriti(Store(ws).programs())
     res = rank_mod.score(progs, cfg["weights"], utcnow(), include_no_bounty=args.include_no_bounty,
                          include_join=args.include_join)
     if args.explain:
@@ -240,6 +261,7 @@ def main(argv=None):
         ("flows", None): cmd_flows,
         ("guard", "status"): lambda a, w: guard_mod.guard_status(a.json),
         ("program", "use"): lambda a, w: guard_mod.program_use(w, a.handle),
+        ("manual", "add"): lambda a, w: manual_mod.add(w, a, sys.stdout),
         ("burp", None): cmd_burp,
     }
     fn = handlers.get((args.group, getattr(args, "cmd", None)))
