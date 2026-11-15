@@ -78,7 +78,9 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | BE-18 | Backender | Recon (CONTRACTS §10): automatic passive (crt.sh + DNS, guard matcher), on-key active map of the active program (httpx + katana via the guard), `recon list`, `program-closed` kind, Tauri commands | in progress |
 | FE-6 | Frontender | Look-here panel (`l`), map key (`m`) with progress, new-host highlight (CONTRACTS §10.4) | in progress |
 | BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | todo |
-| BE-7 | Backender | `hunter/` Claude copilot (see slice 2) | todo |
+| BE-7 | Architect | `hunter/` Claude copilot (CONTRACTS §12.2) | done |
+| BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | doing |
+| FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | doing |
 | BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
 
 | BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | done (#31) |
