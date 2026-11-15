@@ -164,11 +164,18 @@ def _strip(prog):
     return {k: v for k, v in (prog or {}).items() if k not in VOLATILE}
 
 
-def _same_json(a_bytes, b_bytes):
+ERROR_VOLATILE = ("identifier",)  # API error bodies carry a fresh id per response
+
+
+def _same_json(a_bytes, b_bytes, name=""):
     try:
-        return json.loads(a_bytes) == json.loads(b_bytes)
+        a, b = json.loads(a_bytes), json.loads(b_bytes)
     except (ValueError, TypeError):
         return a_bytes == b_bytes
+    if name.startswith("detail-") and isinstance(a, dict) and isinstance(b, dict):
+        a = {k: v for k, v in a.items() if k not in ERROR_VOLATILE}
+        b = {k: v for k, v in b.items() if k not in ERROR_VOLATILE}
+    return a == b
 
 
 def _changed_since_last_snapshot(store, h, prog, raw_files):
@@ -181,7 +188,7 @@ def _changed_since_last_snapshot(store, h, prog, raw_files):
         return True
     for name, body in raw_files.items():
         old = store.latest_raw_file(h, name)
-        if old is None or not _same_json(old, body):
+        if old is None or not _same_json(old, body, name):
             return True
     return False
 
