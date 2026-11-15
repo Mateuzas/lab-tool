@@ -25,7 +25,7 @@ WS=$(mktemp -d "$ROOT/workspace/.guard-test.XXXXXX")
 VOL=kali-bounty-test-guard
 VAR=/var/lib/bounty-guard
 export BOUNTY_CONTAINER=$C BOUNTY_LAB_CONTAINER=kali-lab-guard-test-none BOUNTY_IMAGE=$IMAGE \
-       BOUNTY_GUARD_PORT=$PORT BOUNTY_WORKSPACE=$WS BOUNTY_GUARD_VOLUME=$VOL
+       BOUNTY_GUARD_PORT=$PORT BOUNTY_WORKSPACE=$WS BOUNTY_GUARD_VOLUME=$VOL BOUNTY_HOME_VOLUME=$VOL-home
 
 fail=0
 check() { if [ "$1" = ok ]; then echo "  PASS: $2"; else echo "  FAIL: $2"; fail=1; fi; }
@@ -34,11 +34,11 @@ expect() { if [ "$1" = "$2" ]; then check ok "$3"; else check bad "$3 (got '$1',
 cleanup() {
   docker rm -f "$C" "$T" >/dev/null 2>&1
   docker network rm "$NET" "$NETI" >/dev/null 2>&1
-  docker volume rm "$VOL" >/dev/null 2>&1
+  docker volume rm "$VOL" "$VOL-home" >/dev/null 2>&1
   rm -rf "$WS"
 }
 [ -n "${BOUNTY_TEST_KEEP:-}" ] || trap cleanup EXIT
-cleanup_quiet() { docker rm -f "$C" "$T" >/dev/null 2>&1; docker network rm "$NET" "$NETI" >/dev/null 2>&1; docker volume rm "$VOL" >/dev/null 2>&1; }
+cleanup_quiet() { docker rm -f "$C" "$T" >/dev/null 2>&1; docker network rm "$NET" "$NETI" >/dev/null 2>&1; docker volume rm "$VOL" "$VOL-home" >/dev/null 2>&1; }
 cleanup_quiet
 
 as_root() { docker exec "$C" "$@"; }
@@ -113,15 +113,16 @@ json.dump({"hosts": ["whoami.recon.test"], "rate_limit_rps": 2,
 PY
 mkdir -p "$WS/programs/test-broken" && echo '{"schema": 1, "handle": "test-broken", "scope": ' > "$WS/programs/test-broken/program.json"
 
+# The root filesystem is read-only, so the fake names go into /etc/hosts when the container is made.
+BOUNTY_GUARD_ADD_HOSTS=""
+for n in app.acme.test deep.app.acme.test acme.test community.acme.test legacy.acme.test other.test unrelated.test whoami.recon.test; do
+  BOUNTY_GUARD_ADD_HOSTS="$BOUNTY_GUARD_ADD_HOSTS $n:203.0.113.10"
+done
+export BOUNTY_GUARD_ADD_HOSTS="$BOUNTY_GUARD_ADD_HOSTS intranet.acme.test:10.99.0.10 meta.acme.test:169.254.169.254"
 host/bounty guard start || { echo "guard start failed"; docker logs "$C" | tail; exit 1; }
 docker network connect --ip 203.0.113.2 "$NET" "$C"
 docker network connect --ip 10.99.0.2 "$NETI" "$C"
-as_root sh -c 'cat >> /etc/hosts <<EOF
-203.0.113.10 app.acme.test deep.app.acme.test acme.test community.acme.test legacy.acme.test other.test unrelated.test whoami.recon.test
-10.99.0.10 intranet.acme.test
-169.254.169.254 meta.acme.test
-EOF
-cp /bounty/testca/ca.pem /usr/local/share/ca-certificates/guard-test-ca.crt && update-ca-certificates >/dev/null 2>&1'
+as_root sh -c 'cp /bounty/testca/ca.pem /usr/local/share/ca-certificates/guard-test-ca.crt && update-ca-certificates >/dev/null 2>&1'
 # Restart the guard so it reads the trust store with the test CA (upstream verification stays on).
 as_root pkill -9 -u guard; sleep 3
 for _ in $(seq 1 20); do [ "$(as_root cat $VAR/guard.json | jget 'd.get("guard")')" = up ] && break; sleep 0.5; done
