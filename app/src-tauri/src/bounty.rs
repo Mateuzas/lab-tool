@@ -16,6 +16,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::alerts;
+use crate::tools;
 
 /// Repo root (dev builds use the repo's CLI, as for `tutor/`).
 const REPO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
@@ -442,6 +443,36 @@ pub fn use_program(handle: &str) -> Result<GuardStatus, String> {
     guard_status()
 }
 
+/// The Terminal commands (CONTRACTS §12.3) need kali-bounty running with an active program.
+pub fn work_surface_ready(st: &GuardStatus) -> Result<(), String> {
+    if !st.running {
+        return Err("Start the guard first.".into());
+    }
+    if st.program.is_none() {
+        return Err("Pick a program first.".into());
+    }
+    Ok(())
+}
+
+/// `'<repo>/host/bounty' shell` (CONTRACTS §12.1).
+pub fn shell_command(repo: &std::path::Path) -> String {
+    format!("{} shell", tools::sh_quote(&repo.join("host/bounty").to_string_lossy()))
+}
+
+/// A Terminal window with the hunter shell in kali-bounty (`host/bounty shell`).
+pub fn open_shell() -> Result<(), String> {
+    work_surface_ready(&guard_status()?)?;
+    tools::open_terminal(&shell_command(&repo_dir()?))
+}
+
+/// A Terminal window with the Claude copilot: `cd <repo>/hunter && claude` (CONTRACTS §12.2).
+pub fn open_hunter() -> Result<(), String> {
+    work_surface_ready(&guard_status()?)?;
+    let bin = tools::claude_bin().ok_or("Claude Code isn't installed.")?;
+    let dir = std::fs::canonicalize(repo_dir()?.join("hunter")).map_err(|_| "The hunter folder is missing.".to_string())?;
+    tools::open_terminal(&tools::cd_and_run(&dir, &bin))
+}
+
 /// Application states the app may set (CONTRACTS §11.1); `none` clears it.
 pub const APPLICATION_STATES: &[&str] = &["none", "applied", "accepted", "rejected", "withdrawn"];
 
@@ -520,6 +551,35 @@ pub fn open_burp() -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn work_surface_needs_guard_and_program() {
+        let off = parse_guard_status(&serde_json::json!({"status": "not-running"}));
+        assert_eq!(work_surface_ready(&off), Err("Start the guard first.".to_string()));
+        let none = parse_guard_status(&serde_json::json!({"status": "no-profile", "program": null}));
+        assert_eq!(work_surface_ready(&none), Err("Pick a program first.".to_string()));
+        let on = parse_guard_status(&serde_json::json!({"status": "active", "program": "intigriti-acme"}));
+        assert_eq!(work_surface_ready(&on), Ok(()));
+    }
+
+    #[test]
+    fn shell_command_quotes_the_repo_path() {
+        assert_eq!(shell_command(std::path::Path::new("/Users/me/Developer/kali-lab")),
+                   "'/Users/me/Developer/kali-lab/host/bounty' shell");
+        let cmd = shell_command(std::path::Path::new("/tmp/it's here"));
+        assert_eq!(cmd, r"'/tmp/it'\''s here/host/bounty' shell");
+        assert_eq!(tools::terminal_script(&cmd),
+                   "tell application \"Terminal\"\nactivate\ndo script \"'/tmp/it'\\\\''s here/host/bounty' shell\"\nend tell");
+    }
+
+    #[test]
+    fn hunter_command_cds_into_hunter() {
+        let cmd = tools::cd_and_run(std::path::Path::new("/r/kali lab/hunter"), std::path::Path::new("/opt/homebrew/bin/claude"));
+        assert_eq!(cmd, "cd '/r/kali lab/hunter' && '/opt/homebrew/bin/claude'");
+        let script = tools::terminal_script(&cmd);
+        assert!(script.starts_with("tell application \"Terminal\"\nactivate\ndo script \"cd "));
+        assert!(script.ends_with("claude'\"\nend tell"));
+    }
 
     #[test]
     fn only_intigriti_urls_open() {
