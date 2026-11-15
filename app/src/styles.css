@@ -757,3 +757,42 @@ tr.join .total .tbar {
   .pg-refusals { left: 0; right: auto; width: min(560px, calc(100vw - 2 * var(--gutter))); }
   .pg-guard-box ~ .pg-refresh { margin-left: 0; }
 }
+
+/* ---- FE-7: application tags, manual targets, shortcut overlay ---- */
+.pg-app {
+  margin-left: 8px; padding: 0 6px; border-radius: 4px; font-size: 0.82em; font-weight: 700; line-height: 1.6;
+  border: 1px dashed var(--hair); color: var(--ink-soft); vertical-align: 1px;
+}
+.pg-app.app-applied { color: var(--wait); border-color: color-mix(in srgb, var(--wait) 55%, transparent); }
+.pg-app.app-accepted { color: var(--go); border-style: solid; border-color: color-mix(in srgb, var(--go) 55%, transparent); }
+.pg-app.app-rejected { color: var(--ink-soft); text-decoration: line-through; }
+
+.pg-manual-head th { border-top: 2px solid var(--hair); }
+.pg-manual-head strong { color: var(--ink); }
+.pg-table tr.manual .pg-name { font-weight: 700; }
+.pg-table td.pg-manual-info { color: var(--ink-soft); white-space: nowrap; }
+.pg-manual-info > span { margin-right: 22px; }
+.pg-manual-info b { color: var(--ink); font-weight: 700; }
+.pg-manual-info .scope b, .pg-manual-info time { font-family: var(--mono); }
+.pg-manual-info time { color: var(--ink); }
+.pg-manual-info .soon time { color: var(--wait); font-weight: 700; }
+.pg-table tr.manual.expired .pg-manual-info time { color: var(--stop); }
+
+.pg-help {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: var(--gutter, 16px);
+  background: color-mix(in srgb, var(--ink) 35%, transparent);
+}
+.pg-help[hidden] { display: none; }
+.pg-help-card {
+  width: min(880px, 100%); max-height: calc(100vh - 32px); overflow: auto;
+  padding: 18px 22px 20px; border-radius: 8px; background: var(--field); color: var(--ink);
+  border-top: 4px solid var(--cta); box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 30%, transparent);
+}
+.pg-help-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.pg-help-card h2 { margin: 0; font-size: 1.15em; }
+.pg-help-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 8px 28px; }
+.pg-help dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; align-content: start; }
+.pg-help dt:first-child { grid-column: 1 / -1; color: var(--cta); font-weight: 700; padding-bottom: 2px; border-bottom: 1px solid var(--hair); }
+.pg-help dt:first-child + dd { display: none; }
+.pg-help dt { white-space: nowrap; color: var(--ink-soft); }
+.pg-help dd { margin: 0; }

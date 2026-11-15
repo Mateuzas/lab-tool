@@ -231,11 +231,48 @@
         <p class="pg-keys" aria-label="Keyboard shortcuts">
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
-          <span><kbd>u</kbd> use program</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span>
-          <span>click a heading to sort</span>
+          <span><kbd>u</kbd> use program</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
+          <span><kbd>?</kbd> all keys</span>
         </p>
         <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
       </footer>
+
+      <div class="pg-help" id="pg-help" hidden>
+        <section class="pg-help-card" role="dialog" aria-modal="true" aria-labelledby="pg-help-title">
+          <header>
+            <h2 id="pg-help-title">Keyboard shortcuts</h2>
+            <button type="button" id="pg-help-close" aria-label="Close">Close <kbd>Esc</kbd></button>
+          </header>
+          <div class="pg-help-cols">
+            <dl>
+              <dt>Table</dt><dd></dd>
+              <dt><kbd>j</kbd><kbd>k</kbd> <kbd>↓</kbd><kbd>↑</kbd></dt><dd>Move the selection</dd>
+              <dt><kbd>Home</kbd> <kbd>End</kbd> <kbd>G</kbd></dt><dd>First or last row</dd>
+              <dt><kbd>PgUp</kbd> <kbd>PgDn</kbd></dt><dd>Move a screen</dd>
+              <dt><kbd>↵</kbd> <kbd>o</kbd></dt><dd>Open the program on Intigriti</dd>
+              <dt><kbd>/</kbd></dt><dd>Filter by name, handle or industry</dd>
+              <dt><kbd>Esc</kbd></dt><dd>Clear the filter, close a list</dd>
+              <dt>Click a heading</dt><dd>Sort by that column</dd>
+            </dl>
+            <dl>
+              <dt>Programs</dt><dd></dd>
+              <dt><kbd>r</kbd></dt><dd>Refresh from Intigriti</dd>
+              <dt><kbd>c</kbd></dt><dd>Changes since the last sync</dd>
+              <dt><kbd>x</kbd></dt><dd>Show or hide excluded programs</dd>
+              <dt><kbd>J</kbd></dt><dd>Join programs last or mixed in</dd>
+              <dt><kbd>a</kbd></dt><dd>Application: none, applied, accepted, rejected</dd>
+            </dl>
+            <dl>
+              <dt>Scope guard</dt><dd></dd>
+              <dt><kbd>u</kbd></dt><dd>Use the selected program or manual target</dd>
+              <dt><kbd>b</kbd></dt><dd>Open Burp through the guard</dd>
+              <dt><kbd>g</kbd></dt><dd>Stop the guard</dd>
+              <dt><kbd>R</kbd></dt><dd>Requests the guard refused</dd>
+              <dt><kbd>?</kbd></dt><dd>This list</dd>
+            </dl>
+          </div>
+        </section>
+      </div>
     </main>
   </body>
 </html>

@@ -19,8 +19,11 @@ export type RankedProgram = {
             rate_limit_rps: number | null; [k: string]: unknown };
   flags: string[];
   excluded: string | null;
+  application?: { state: string; ts: string } | null; // CONTRACTS §11.1
   [k: string]: unknown; // e.g. industry, if the backend adds it
 };
+/** A target the owner authorised outside Intigriti (CONTRACTS §11.3). */
+export type ManualTarget = { handle: string; name: string; scope_in: number; scope_out: number; authorized_by: string; expires: string };
 export type SyncEvent =
   | { kind: "progress"; done: number; total: number; text: string }
   | { kind: "done"; changes: ChangeEvent[] }
@@ -136,11 +139,16 @@ function tagFor(list: ChangeEvent[]): string {
   return parts.join(", ") || "changed";
 }
 
+/** `a` cycles a join program's application: none → applied → accepted → rejected → none. */
+const APP_CYCLE = ["none", "applied", "accepted", "rejected"] as const;
+const nextApp = (s: string | undefined) => APP_CYCLE[(APP_CYCLE.indexOf((s ?? "none") as typeof APP_CYCLE[number]) + 1) % APP_CYCLE.length];
+
 const isJoin = (p: RankedProgram) => p.flags.includes("join");
 const industry = (p: RankedProgram) => String(p.industry ?? p.inputs.industry ?? "");
 
 export function setupPrograms(opts: { visible: () => boolean; setModeState: (text: string, state: string) => void }) {
   let ranking: Ranking | null = null;
+  let manual: ManualTarget[] = [];
   let loadError = "";
   let running = false;
   let progress: { done: number; total: number; text: string } | null = null;
@@ -169,7 +177,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
 
   const guard = setupGuard({
     visible: opts.visible,
-    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || h,
+    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
     onChange: () => markActive(),
   });
 
@@ -277,6 +285,17 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     const joinCount = (ranking?.programs ?? []).filter((p) => !p.excluded && isJoin(p)).length;
     section(join, `${joinCount} need joining first. Findability and friction are assumed until you join.`);
     if (showExcluded) section(excluded, `${excluded.length} excluded: no bounty, no safe harbour or no web scope.`);
+    const man = manual.filter((m) => !q || `${m.name} ${m.handle} ${m.authorized_by}`.toLowerCase().includes(q));
+    if (man.length) {
+      const tr = el("tr", "pg-group pg-manual-head");
+      const th = el("th");
+      th.colSpan = COLS.length;
+      th.scope = "rowgroup";
+      th.append(el("strong", "", "Manual targets"), el("span", "", ` ${man.length} authorised outside Intigriti. Not ranked; u, b and g work the same.`));
+      tr.append(th);
+      frag.append(tr);
+      for (const m of man) frag.append(manualRow(m));
+    }
     body.replaceChildren(frag);
 
     if (selected === null || !rows.has(selected)) selected = visibleHandles[0] ?? null;
@@ -307,6 +326,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     a.tabIndex = -1; // the row is the keyboard target; Enter opens it
     a.addEventListener("click", (e) => { e.preventDefault(); select(p.handle); open(p); });
     name.append(a, el("span", "handle", p.handle));
+    if (isJoin(p) && !p.excluded) appTag(name, p);
     if (changed) {
       const tag = el("span", "pg-tag", tagFor(changed));
       const last = changed.filter((c) => c.kind.startsWith("access-")).pop();
@@ -355,6 +375,64 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     rows.set(p.handle, tr);
     visibleHandles.push(p.handle);
     return tr;
+  }
+
+  /** Manual targets: name and handle, then scope counts and who authorised it, across the factor columns. */
+  function manualRow(m: ManualTarget) {
+    const tr = el("tr", "manual");
+    tr.dataset.handle = m.handle;
+    tr.append(el("td", "num rank", DASH));
+    const name = el("td", "name");
+    name.append(el("span", "pg-name", m.name || m.handle), el("span", "handle", m.handle));
+    name.title = `${m.name}\n${m.handle}`;
+    tr.append(name);
+    const info = el("td", "pg-manual-info");
+    info.colSpan = COLS.length - 2;
+    const scope = el("span", "scope");
+    scope.append(el("b", "", String(m.scope_in)), " in ", el("b", "", String(m.scope_out)), " out");
+    const by = el("span", "", "authorised by ");
+    by.append(el("b", "", m.authorized_by || DASH));
+    const exp = el("span", "", "expires ");
+    const t = el("time", "", m.expires || DASH);
+    t.dateTime = m.expires;
+    const days = Math.ceil((Date.parse(m.expires) - Date.now()) / 864e5);
+    if (!Number.isNaN(days) && days < 0) { tr.classList.add("expired"); exp.textContent = "expired "; }
+    else if (!Number.isNaN(days) && days <= 14) exp.classList.add("soon");
+    exp.append(t);
+    info.append(scope, by, exp);
+    tr.append(info);
+    tr.addEventListener("click", () => select(m.handle));
+    rows.set(m.handle, tr);
+    visibleHandles.push(m.handle);
+    return tr;
+  }
+
+  /** The application tag on a join row (CONTRACTS §11.1). */
+  function appTag(name: HTMLElement, p: RankedProgram) {
+    name.querySelector(".pg-app")?.remove();
+    const st = p.application?.state;
+    if (!st) return;
+    const tag = el("span", `pg-app app-${st}`, st);
+    tag.title = `Application ${st}${p.application?.ts ? ` ${new Date(p.application.ts).toLocaleDateString()}` : ""}. Press a to change.`;
+    name.querySelector(".handle")!.after(tag);
+  }
+
+  async function cycleApplication() {
+    const p = ranking?.programs.find((x) => x.handle === selected);
+    if (!p || !isJoin(p) || p.excluded) return;
+    const before = p.application ?? null;
+    const state = nextApp(before?.state);
+    p.application = state === "none" ? null : { state, ts: new Date().toISOString() };
+    const name = rows.get(p.handle)?.querySelector<HTMLElement>(".name");
+    if (name) appTag(name, p);
+    try {
+      await invoke("bounty_set_application", { handle: p.handle, state });
+    } catch (e) {
+      p.application = before;
+      if (name) appTag(name, p);
+      refreshError = { code: "application", message: `couldn't mark ${p.name || p.handle} ${state}: ${String(e)}` };
+      drawChrome();
+    }
   }
 
   function markSelected(scroll = true) {
@@ -514,6 +592,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   async function load() {
     try {
       ranking = await invoke<Ranking>("bounty_ranking");
+      try { manual = await invoke<ManualTarget[]>("bounty_manual_list"); } catch { manual = []; } // older backend
       guard.redraw(); // names for the indicator
       loadError = "";
     } catch (e) {
@@ -593,6 +672,10 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       return;
     }
     if (t.closest("input, textarea, select, [contenteditable]")) return;
+    if (!help.hidden) {
+      if (e.key === "Escape" || e.key === "?") { e.preventDefault(); toggleHelp(false); }
+      return; // the overlay is modal
+    }
     const onButton = !!t.closest("button, a");
     let handled = true;
     switch (e.key) {
@@ -611,10 +694,13 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "u": if (selected) void guard.use(selected); break;
       case "b": void guard.burp(); break;
       case "g": void guard.stop(); break;
+      case "a": void cycleApplication(); break;
+      case "?": toggleHelp(true); break;
       case "R": guard.toggleRefusals(); break;
       case "c": if (changes.length) { changesOpen = !changesOpen; drawChrome(); } break;
       case "Escape":
-        if (guard.escape()) { /* closed the popover or cancelled a switch */ }
+        if (!help.hidden) toggleHelp(false);
+        else if (guard.escape()) { /* closed the popover or cancelled a switch */ }
         else if (changesOpen) { changesOpen = false; drawChrome(); }
         else if (filter) { filter = ""; filterBox.value = ""; render(); }
         else handled = false;
@@ -623,6 +709,14 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     }
     if (handled) e.preventDefault();
   });
+
+  const help = $("pg-help");
+  function toggleHelp(on: boolean) {
+    help.hidden = !on;
+    if (on) $("pg-help-close").focus(); else wrap.focus({ preventScroll: true });
+  }
+  $("pg-help-close").addEventListener("click", () => toggleHelp(false));
+  help.addEventListener("click", (e) => { if (e.target === help) toggleHelp(false); });
 
   function openSelected() {
     const p = ranking?.programs.find((x) => x.handle === selected);
