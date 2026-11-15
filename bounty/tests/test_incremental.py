@@ -96,7 +96,9 @@ class TestIncremental(unittest.TestCase):
         idx, _ = self.again(NOW + datetime.timedelta(hours=25))
         self.assertEqual(details(self.api.calls), ["p-b"])
         self.assertEqual(idx["detail_fetched"], ["intigriti-beta"])
-        # the unchanged 403 is not stored again, but still counts as checked
+        # a 403 that differs only in its per-response identifier is not stored again,
+        # but still counts as checked
+        self.assertEqual(idx["snapshots"], [])
         self.api.calls = []
         self.again(NOW + datetime.timedelta(hours=30))
         self.assertEqual(details(self.api.calls), [])

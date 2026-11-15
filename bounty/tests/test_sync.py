@@ -48,7 +48,8 @@ class FakeAPI(object):
         pid = path.rsplit("/", 1)[1]
         if pid in self.details:
             return Response(200, fx.body(self.details[pid]))
-        return Response(403, b'{"message":"You need to join this program"}')
+        self.n403 = getattr(self, "n403", 0) + 1  # like the real API: a fresh identifier per response
+        return Response(403, ('{"identifier":"id-%d","message":"You need to join this program"}' % self.n403).encode())
 
 
 def make_client(api, sleeps=None):
