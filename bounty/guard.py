@@ -11,7 +11,15 @@ kali-bounty-guard at /var/lib/bounty-guard (guard state, flows, CA), read here o
 Environment (tests use them so they never touch the real containers):
   BOUNTY_CONTAINER (kali-bounty), BOUNTY_LAB_CONTAINER (kali-lab), BOUNTY_IMAGE (kali-lab:dev),
   BOUNTY_GUARD_PORT (8081, the Mac port Burp uses as upstream proxy),
-  BOUNTY_GUARD_VOLUME (kali-bounty-guard).
+  BOUNTY_GUARD_VOLUME (kali-bounty-guard), BOUNTY_HOME_VOLUME (kali-bounty-home),
+  BOUNTY_GUARD_ADD_HOSTS (tests only: "name:ip name:ip", written to /etc/hosts at creation, since
+  the read-only root filesystem keeps /etc/hosts read-only afterwards).
+
+Hardening (CONTRACTS §3.3): every capability dropped except the ones the supervisor needs as root
+(firewall, switching to guard/hunter, preparing their directories, killing a stray guard),
+no-new-privileges, a read-only root filesystem with tmpfs for the paths written at run time (the
+trust store is rebuilt there on every start), and hunter's home in its own volume. A container made
+with an older spec (label kali-lab.guard-spec) is recreated by `guard start`; the volumes stay.
 """
 
 import datetime
@@ -25,6 +33,10 @@ from bounty.util import REPO_ROOT, BountyError, read_json, write_bytes
 
 USERNAME_ENV = "INTIGRITI_USERNAME"
 VAR = "/var/lib/bounty-guard"
+SPEC = "2"   # bump whenever run_args changes, so `guard start` recreates an older container
+CAPS = ("NET_ADMIN", "SETUID", "SETGID", "SETPCAP", "CHOWN", "FOWNER", "DAC_OVERRIDE", "KILL")
+TMPFS = (("/tmp", "1777"), ("/run", "755"), ("/var/log", "755"), ("/etc/ssl/certs", "755"),
+         ("/usr/local/share/ca-certificates", "755"))
 
 
 def _cfg():
@@ -36,7 +48,9 @@ def _cfg():
             "lab": e.get("BOUNTY_LAB_CONTAINER") or "kali-lab",
             "image": e.get("BOUNTY_IMAGE") or "kali-lab:dev",
             "port": port,
-            "volume": e.get("BOUNTY_GUARD_VOLUME") or "kali-bounty-guard"}
+            "volume": e.get("BOUNTY_GUARD_VOLUME") or "kali-bounty-guard",
+            "home": e.get("BOUNTY_HOME_VOLUME") or "kali-bounty-home",
+            "add_hosts": (e.get("BOUNTY_GUARD_ADD_HOSTS") or "").split()}
 
 
 def _docker(args, check=False, capture=True, env=None, input_text=None):
@@ -75,11 +89,24 @@ def read_state(cfg):
 def run_args(cfg, ws):
     """CONTRACTS §3.3 (name, image, Mac port and volume configurable for tests). Only the guard's
     8080 is published, on 127.0.0.1; the claude port 8082 stays inside the container."""
-    return ["run", "-d", "--name", cfg["container"], "--init", "--restart", "unless-stopped",
-            "--cap-add=NET_ADMIN", "-p", "127.0.0.1:%s:8080" % cfg["port"],
-            "-v", "%s:/bounty:ro" % ws, "-v", "%s:/bounty/work:rw" % os.path.join(ws, "work"),
-            "-v", "%s:%s" % (cfg["volume"], VAR),
-            cfg["image"], "bounty-supervisor"]
+    args = ["run", "-d", "--name", cfg["container"], "--init", "--restart", "unless-stopped",
+            "--label", "kali-lab.guard-spec=" + SPEC, "--cap-drop=ALL"]
+    args += ["--cap-add=" + c for c in CAPS]
+    args += ["--security-opt", "no-new-privileges:true", "--read-only"]
+    for path, mode in TMPFS:
+        args += ["--tmpfs", "%s:rw,nosuid,nodev,mode=%s" % (path, mode)]
+    for entry in cfg.get("add_hosts") or ():
+        args += ["--add-host", entry]
+    args += ["-p", "127.0.0.1:%s:8080" % cfg["port"],
+             "-v", "%s:/bounty:ro" % ws, "-v", "%s:/bounty/work:rw" % os.path.join(ws, "work"),
+             "-v", "%s:%s" % (cfg["volume"], VAR), "-v", "%s:/home/hunter" % cfg["home"],
+             cfg["image"], "bounty-supervisor"]
+    return args
+
+
+def spec_of(name):
+    code, out, _ = _docker(["inspect", "-f", '{{index .Config.Labels "kali-lab.guard-spec"}}', name])
+    return out.strip() if code == 0 else None
 
 
 def guard_start(ws, out=sys.stdout):
@@ -88,6 +115,10 @@ def guard_start(ws, out=sys.stdout):
         _docker(["stop", cfg["lab"]], check=True)
         out.write("stopped %s: one mode at a time (Lab comes back with host/lab up)\n" % cfg["lab"])
     os.makedirs(os.path.join(ws, "work"), exist_ok=True)
+    if exists(cfg["container"]) and spec_of(cfg["container"]) != SPEC:
+        _docker(["rm", "-f", cfg["container"]], check=True)
+        out.write("recreated %s with the current hardening (flows, CA and hunter's home kept)\n"
+                  % cfg["container"])
     if exists(cfg["container"]):
         _docker(["start", cfg["container"]], check=True)
     else:
@@ -113,16 +144,17 @@ def guard_stop(purge=False, yes=False, out=sys.stdout):
     cfg = _cfg()
     if purge and not yes:
         raise BountyError("usage", "--purge deletes the volume %s: every flow log (report evidence) and the "
-                                   "guard CA. Export flows first (flows export), then add --yes" % cfg["volume"], 64)
+                                   "guard CA (and %s, hunter's home). Export flows first (flows export), then add --yes" % (cfg["volume"], cfg["home"]), 64)
     if exists(cfg["container"]):
         _docker(["rm", "-f", cfg["container"]], check=True)
         out.write("removed %s (workspace kept)\n" % cfg["container"])
     else:
         out.write("%s is not there\n" % cfg["container"])
     if purge:
-        if _docker(["volume", "inspect", cfg["volume"]])[0] == 0:
-            _docker(["volume", "rm", cfg["volume"]], check=True)
-            out.write("removed volume %s (flows and guard CA)\n" % cfg["volume"])
+        for vol, what in ((cfg["volume"], "flows and guard CA"), (cfg["home"], "hunter's home")):
+            if _docker(["volume", "inspect", vol])[0] == 0:
+                _docker(["volume", "rm", vol], check=True)
+                out.write("removed volume %s (%s)\n" % (vol, what))
     else:
         out.write("flows and guard CA kept in volume %s\n" % cfg["volume"])
     return 0
