@@ -38,6 +38,9 @@ const programs = {
   "manual-active": ["loaded", async (p) => { await p.keyboard.press("End"); await p.keyboard.press("u"); await p.waitForFunction(() => document.querySelector("tr.manual.active")); }, "synced", "off"],
   "shortcuts": ["loaded", async (p) => { await p.keyboard.press("?"); }, "synced"],
   "guard-lost": ["loaded", async (p) => { await p.waitForFunction(() => /press u/.test(document.querySelector("#pg-guard .g-text")?.textContent ?? ""), null, { timeout: 8000 }); }, "synced", "lost"],
+  // Work surface (FE-8): shell `t` and Claude `h`, enabled only with a program in the guard
+  "work-off": ["loaded", async (p) => { await p.keyboard.press("t"); }, "synced", "off"],
+  "work-active": ["loaded", async (p) => { await p.keyboard.press("h"); }, "synced", "active"],
 };
 const scenarios = only ?? [...lab, ...Object.keys(programs)];
 

@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * The scope guard on the Programs screen (FE-4, docs/CONTRACTS.md §9.1): header indicator, use a
  * program (`u`), open Burp through the guard (`b`), stop it (`g`), and the last refusals.
+ * FE-8 (§12.4): a shell in the guard container (`t`) and the Claude copilot (`h`), active program only.
  */
 export type GuardStatus = {
   running: boolean;
@@ -90,6 +91,13 @@ export function setupGuard(opts: {
     line.textContent = msg;
     line.dataset.kind = kind;
     $<HTMLButtonElement>("pg-burp").disabled = !!busy;
+    // aria-disabled, not disabled: WebKit shows no tooltip on a disabled button, and the tooltip says why.
+    const why = workBlocked();
+    for (const [id, label] of [["pg-shell", "Open a shell in the guard container"], ["pg-hunter", "Open the Claude copilot"]] as const) {
+      const b = $<HTMLButtonElement>(id);
+      b.setAttribute("aria-disabled", String(!!why));
+      b.title = why ?? label;
+    }
     $<HTMLButtonElement>("pg-guard-stop").disabled = !!busy || !s?.running;
   }
 
@@ -165,6 +173,30 @@ export function setupGuard(opts: {
     draw();
   }
 
+  /** Why `t` and `h` can't run now, or null when they can. */
+  function workBlocked(): string | null {
+    if (busy) return busy;
+    if (!status?.running || status.status === "down" || status.status === null) return "Guard off. Press u on a program first.";
+    if (!active()) return "No program loaded in the guard. Press u on a program first.";
+    return null;
+  }
+
+  async function work(cmd: "bounty_open_shell" | "bounty_open_hunter", what: string) {
+    const why = workBlocked();
+    confirming = null;
+    if (why) { error = `Can't open ${what}: ${why}`; draw(); return; }
+    error = "";
+    draw();
+    try {
+      await invoke(cmd);
+    } catch (e) {
+      error = `Couldn't open ${what}: ${String(e)}`;
+    }
+    draw();
+  }
+  const shell = () => work("bounty_open_shell", "the shell");
+  const hunter = () => work("bounty_open_hunter", "the Claude copilot");
+
   function toggleRefusals() {
     if (!status?.last_refusals.length) return;
     refusalsOpen = !refusalsOpen;
@@ -176,11 +208,13 @@ export function setupGuard(opts: {
   ind.addEventListener("click", toggleRefusals);
   $("pg-burp").addEventListener("click", () => void burp());
   $("pg-guard-stop").addEventListener("click", () => void stop());
+  $("pg-shell").addEventListener("click", () => void shell());
+  $("pg-hunter").addEventListener("click", () => void hunter());
 
   draw();
   return {
     active,
-    use, stop, burp, toggleRefusals,
+    use, stop, burp, shell, hunter, toggleRefusals,
     /** Esc: close the popover or cancel a pending switch. True when it did something. */
     escape() {
       if (confirming) { confirming = null; draw(); return true; }

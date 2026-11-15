@@ -197,6 +197,10 @@ async function bountyRefresh(channel: { id: number }) {
       p.application = args.state && args.state !== "none" ? { state: args.state, ts: iso(0) } : null;
       return null;
     }
+    if (cmd === "bounty_open_shell" || cmd === "bounty_open_hunter") {
+      if (!guard.running || !guard.program) throw "bounty: no program in use";
+      console.info(cmd); return null;
+    }
     if (cmd === "bounty_open_burp") return guard.running ? null : "Burp opened. Use a program first, or Burp has no upstream proxy.";
     if (cmd === "open_program") {
       if (!String(args.url).startsWith("https://app.intigriti.com/")) throw "not an Intigriti program URL";

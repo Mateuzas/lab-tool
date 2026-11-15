@@ -703,6 +703,10 @@ tr.join .total .tbar {
 .pg-guard-box { position: relative; margin-left: auto; flex: 0 1 auto; min-width: 0; align-self: center; }
 .pg-guard-box ~ .pg-refresh { margin-left: 0; }
 .pg-head > .pg-toggle { flex: none; align-self: center; }
+/* Shell and Claude: aria-disabled (keeps the tooltip that says why), looks like a disabled button. */
+.programs .pg-work[aria-disabled="true"] { opacity: 0.4; cursor: default; }
+.programs .pg-work[aria-disabled="true"]:hover { border-color: var(--rule); }
+.programs .pg-work[aria-disabled="true"]:active { transform: none; }
 .pg-guard {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0;
   color: var(--ink-soft); font-variant-numeric: tabular-nums;
