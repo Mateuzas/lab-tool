@@ -438,3 +438,33 @@ than **24 h** (was 7 days).
 `bounty_manual_list()` → `[{handle, name, scope_in: int, scope_out: int, authorized_by, expires}]`
 from `programs/manual-*/program.json`. UI (FE-7): a compact **Manual targets** section under the
 ranked table (only when any exist) with the same `u`/`b`/`g` keys; no ranking factors shown.
+
+## 12. Work surface: native terminal and Claude copilot (BE-24, BE-7, FE-8)
+Performance over polish: real Terminal.app windows, no embedded terminal for bounty work.
+
+### 12.1 `host/bounty shell`
+Opens an interactive login shell **inside kali-bounty as uid hunter**, so every request goes
+through the guard (iptables lets only the guard connect out). Implementation:
+`docker exec -it -e BOUNTY_HANDLE=<h> -w /bounty/work/<h> kali-bounty bounty-run --actor human -- bash -l`
+where `<h>` is the guard's active handle (from `guard status --json`). The work dir is created
+(owner hunter) if missing. PS1 shows `[<h>] \w $`. Exit codes: 3 when kali-bounty isn't running
+("start the guard first"), 5 when no program is active (message: "pick a program with u / program
+use"), otherwise the shell's exit code. `--handle H` overrides the work dir only, never the policy.
+
+### 12.2 `hunter/`: the Claude copilot (BE-7)
+A Claude Code project like `tutor/`, written by the Architect (CLAUDE.md, settings, .mcp.json).
+Claude reads the active profile, flows and work dir, drafts findings, and runs **target traffic
+only as** `docker exec kali-bounty bounty-run --actor claude -- <cmd>`, each command approved by
+the user. WebFetch/WebSearch, curl/wget/nc on the Mac, and Burp's send tools are denied.
+
+### 12.3 Tauri commands
+- `bounty_open_shell()` → `()`: Terminal.app `do script` running `<repo>/host/bounty shell`
+  (osascript, same quoting as `tools::open_tutor`). Err "Start the guard first." when kali-bounty
+  isn't running, "Pick a program first." when none is active.
+- `bounty_open_hunter()` → `()`: Terminal.app `cd <repo>/hunter && claude`. Err "Claude Code isn't
+  installed." / "Start the guard first." Same guard checks as above.
+
+### 12.4 UI (FE-8)
+Programs screen keys **`t`** (terminal) and **`h`** (Claude copilot), shown as two compact buttons
+next to the guard indicator and in the `?` overlay. Disabled with a tooltip when the guard is off or
+no program is active. Errors show in the existing status line.

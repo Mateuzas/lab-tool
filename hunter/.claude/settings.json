@@ -1,0 +1,60 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "../workspace/bounty"
+    ],
+    "allow": [
+      "Read(../workspace/bounty/programs/**)",
+      "Read(../workspace/bounty/findings/**)",
+      "Read(../workspace/bounty/work/**)",
+      "Write(../workspace/bounty/findings/**)",
+      "Edit(../workspace/bounty/findings/**)",
+      "Bash(../host/bounty guard status:*)",
+      "Bash(../host/bounty flows:*)",
+      "Bash(../host/bounty programs list:*)",
+      "mcp__burp__get_proxy_http_history",
+      "mcp__burp__get_proxy_http_history_regex",
+      "mcp__burp__get_proxy_websocket_history",
+      "mcp__burp__get_proxy_websocket_history_regex",
+      "mcp__burp__url_decode",
+      "mcp__burp__url_encode",
+      "mcp__burp__base64_decode",
+      "mcp__burp__base64_encode"
+    ],
+    "ask": [
+      "Bash(docker exec kali-bounty bounty-run --actor claude -- :*)"
+    ],
+    "deny": [
+      "WebFetch",
+      "WebSearch",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Bash(nc:*)",
+      "Bash(ncat:*)",
+      "Bash(ssh:*)",
+      "Bash(docker exec kali-bounty bounty-run --actor human:*)",
+      "Bash(docker exec -u:*)",
+      "Bash(docker run:*)",
+      "Bash(../host/bounty guard stop:*)",
+      "Bash(../host/bounty program use:*)",
+      "Bash(../host/bounty manual:*)",
+      "Read(../workspace/secrets/**)",
+      "Read(../workspace/vpn/**)",
+      "Read(~/.config/sops/**)",
+      "Edit(../workspace/bounty/programs/**)",
+      "Write(../workspace/bounty/programs/**)",
+      "mcp__burp__send_http1_request",
+      "mcp__burp__send_http2_request",
+      "mcp__burp__create_repeater_tab",
+      "mcp__burp__create_repeater_tab_http2",
+      "mcp__burp__send_to_intruder",
+      "mcp__burp__set_project_options",
+      "mcp__burp__set_user_options",
+      "mcp__burp__set_task_execution_engine_state",
+      "mcp__burp__set_proxy_intercept_state",
+      "mcp__burp__set_active_editor_contents"
+    ],
+    "defaultMode": "default"
+  },
+  "enableAllProjectMcpServers": true
+}
