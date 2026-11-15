@@ -5,6 +5,7 @@ import json
 import os
 import sys
 
+from bounty import applications
 from bounty import changes as changes_mod
 from bounty import guard as guard_mod
 from bounty import manual as manual_mod
@@ -70,6 +71,10 @@ def build_parser():
     u = prs.add_parser("use", help="make a program the guard's active profile "
                                    "(run via scripts/secrets.sh exec intigriti -- for INTIGRITI_USERNAME)")
     u.add_argument("handle")
+    ap = prs.add_parser("apply-state", help="record where your application to a private program stands")
+    ap.add_argument("handle")
+    ap.add_argument("state", help="applied | accepted | rejected | withdrawn")
+    ap.add_argument("--note", default=None)
     man = sub.add_parser("manual", help="a target you were authorised to test directly (not a platform program)")
     ms = man.add_subparsers(dest="cmd")
     ma = ms.add_parser("add", help="create a manual target profile the guard can enforce")
@@ -187,6 +192,9 @@ def cmd_rank(args, ws):
         return 0
     if args.json:
         data = rank_mod.to_json(res)
+        apps = applications.load(ws)
+        for d in data:
+            d["application"] = applications.summary(ws, d["handle"], apps)
         if args.top:
             ranked = [d for d in data if not d["excluded"]][:args.top]
             data = ranked + [d for d in data if d["excluded"]]
@@ -212,6 +220,12 @@ def cmd_changes(args, ws):
     for h, rec in events:
         print("%-36s %-14s %s" % (h, rec["kind"], changes_mod.summary(rec["kind"], rec["detail"])))
     print("%d changes appended to history.jsonl" % len(events))
+    return 0
+
+
+def cmd_apply_state(args, ws):
+    rec = applications.set_state(ws, args.handle.lower(), args.state.lower(), args.note)
+    print("%s: %s (%s)" % (args.handle.lower(), rec["state"], rec["ts"]))
     return 0
 
 
@@ -260,6 +274,7 @@ def main(argv=None):
         ("guard", "stop"): lambda a, w: guard_mod.guard_stop(a.purge, a.yes),
         ("flows", None): cmd_flows,
         ("guard", "status"): lambda a, w: guard_mod.guard_status(a.json),
+        ("program", "apply-state"): cmd_apply_state,
         ("program", "use"): lambda a, w: guard_mod.program_use(w, a.handle),
         ("manual", "add"): lambda a, w: manual_mod.add(w, a, sys.stdout),
         ("burp", None): cmd_burp,

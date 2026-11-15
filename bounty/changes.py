@@ -8,6 +8,7 @@ are not appended or printed again, so a second run on the same syncs reports not
 
 import json
 
+from bounty import applications
 from bounty.store import Store
 from bounty.util import append_jsonl, read_json, read_jsonl, ts_name, BountyError
 
@@ -20,6 +21,8 @@ def _bounty_view(b):
     b = b or {}
     return {k: b.get(k) for k in ("min", "max", "currency", "min_eur", "max_eur")}
 
+
+CLOSED = ("suspended", "closed")
 
 RULE_FIELDS = ("safe_harbour", "rate_limit_rps", "automation", "intigriti_me", "user_agent",
                "request_header")
@@ -38,6 +41,11 @@ def diff(prev, cur):
         events.append(("access-granted", {"name": cur.get("name"), "from": pd, "to": cd}))
     elif pd == "ok" and cd == "needs-join":
         events.append(("access-lost", {"name": cur.get("name"), "from": pd, "to": cd}))
+    pst, cst = prev.get("status"), cur.get("status")
+    if pst == "open" and cst in CLOSED:
+        events.append(("program-closed", {"name": cur.get("name"), "from": pst, "to": cst}))
+    elif pst in CLOSED and cst == "open":
+        events.append(("program-reopened", {"name": cur.get("name"), "from": pst, "to": cst}))
     ps, cs = prev.get("scope"), cur.get("scope")
     # Scope and rules are only compared when both snapshots have them (a 403 or an unfetched
     # detail is not a removal).
@@ -77,6 +85,8 @@ def summary(kind, d):
     if kind == "program-new":
         return "%s (%s, %s, max €%s, detail %s)" % (d.get("name"), d.get("status"), d.get("confidentiality"),
                                                    d.get("max_eur"), d.get("detail"))
+    if kind in ("program-closed", "program-reopened"):
+        return "%s: status %s -> %s" % (d.get("name"), d.get("from"), d.get("to"))
     if kind in ("access-granted", "access-lost"):
         return "%s: detail %s -> %s" % (d.get("name"), d.get("from"), d.get("to"))
     if kind in ("scope-added", "scope-removed"):
@@ -113,13 +123,21 @@ def run(ws, since=None):
     synced_at = index.get("synced_at")
     out = []
     for h in index.get("handles") or []:
-        cur = read_json(store.snapshot_path(h, latest))
+        # CONTRACTS §11.2: a sync writes a snapshot only when the program changed, so the current
+        # state is the newest snapshot <= latest; if that is already <= cutoff nothing changed.
+        snaps = [t for t in store.snapshot_timestamps(h) if t <= latest]
+        if not snaps or snaps[-1] <= cutoff:
+            continue
+        cur_ts = snaps[-1]
+        cur = read_json(store.snapshot_path(h, cur_ts))
         if cur is None:
-            raise BountyError("parse", "snapshot missing: %s at %s" % (h, latest), 4)
-        earlier = [t for t in store.snapshot_timestamps(h) if t <= cutoff and t < latest]
+            raise BountyError("parse", "snapshot unreadable: %s at %s" % (h, cur_ts), 4)
+        earlier = [t for t in snaps if t <= cutoff]
         base_ts = earlier[-1] if earlier else None
         prev = read_json(store.snapshot_path(h, base_ts)) if base_ts else None
         events = diff(prev, cur)
+        if any(k == "access-granted" for k, _ in events):
+            applications.auto_accept(ws, h)
         if not events:
             continue
         seen = set(_canon(x.get("kind"), x.get("detail")) for x in read_jsonl(store.history_path(h)))
@@ -127,7 +145,7 @@ def run(ws, since=None):
         for kind, detail in events:
             detail = dict(detail)
             detail["from_sync"] = base_ts
-            detail["to_sync"] = latest
+            detail["to_sync"] = cur_ts
             if _canon(kind, detail) in seen:
                 continue
             rec = {"ts": synced_at, "kind": kind, "detail": detail}

@@ -7,6 +7,7 @@ none is needed).
 """
 
 import datetime
+import json
 import os
 import sys
 
@@ -18,6 +19,7 @@ from bounty.util import (BountyError, append_jsonl, dumps, iso, iso_from_unix, r
 
 PAGE = 500
 DETAIL_MAX_AGE = datetime.timedelta(days=7)
+JOIN_RECHECK_AGE = datetime.timedelta(hours=24)  # CONTRACTS §11.2: needs-join details re-checked daily
 DETAIL_ACTIVITY_TYPES = ("domains", "rules", "status")  # activity type values that mean "re-fetch"
 
 
@@ -148,9 +150,40 @@ def detail_reason(record, prev, fx, last_detail, now, new_act_pids):
         return "activity"
     if prev.get("detail") not in ("ok", "needs-join") or last_detail is None:
         return "no-detail"
+    if prev.get("detail") == "needs-join" and now - last_detail > JOIN_RECHECK_AGE:
+        return "join-recheck"
     if now - last_detail > DETAIL_MAX_AGE:
         return "stale"
     return None
+
+
+VOLATILE = ("synced_at",)
+
+
+def _strip(prog):
+    return {k: v for k, v in (prog or {}).items() if k not in VOLATILE}
+
+
+def _same_json(a_bytes, b_bytes):
+    try:
+        return json.loads(a_bytes) == json.loads(b_bytes)
+    except (ValueError, TypeError):
+        return a_bytes == b_bytes
+
+
+def _changed_since_last_snapshot(store, h, prog, raw_files):
+    """True if there is no snapshot yet, the profile (minus synced_at) differs from the newest one,
+    or a raw record differs from the newest stored copy of the same file."""
+    snaps = store.snapshot_timestamps(h)
+    if not snaps:
+        return True
+    if _strip(read_json(store.snapshot_path(h, snaps[-1]))) != _strip(json.loads(dumps(prog))):
+        return True
+    for name, body in raw_files.items():
+        old = store.latest_raw_file(h, name)
+        if old is None or not _same_json(old, body):
+            return True
+    return False
 
 
 def run(client, ws, handle=None, now=None, log=None, full=False):
@@ -201,12 +234,11 @@ def run(client, ws, handle=None, now=None, log=None, full=False):
     counts = {"programs": len(records), "open": 0, "detail_ok": 0, "needs_join": 0,
               "detail_errors": 0, "not_fetched": 0, "detail_kept": 0, "activities_new": len(new_acts)}
     counts["details_planned"] = total
-    errors, handles = [], []
+    errors, handles, snapshots = [], [], []
     done = 0
     for r in records:
         h = assigned[r.get("id")]
-        raw = store.raw_dir(h, ts)
-        write_json(os.path.join(raw, "list.json"), r)
+        raw_files = {"list.json": dumps(r).encode("utf-8")}
         prev = prevs[h]
         status = (normalise._value(r.get("status")) or "").lower()
         detail, state = None, "not-fetched"
@@ -225,7 +257,7 @@ def run(client, ws, handle=None, now=None, log=None, full=False):
             if resp is None:
                 pass
             elif resp.status == 200:
-                write_bytes(os.path.join(raw, "detail.json"), resp.body)
+                raw_files["detail.json"] = resp.body
                 try:
                     detail = resp.json()
                     if not isinstance(detail, dict):
@@ -235,12 +267,14 @@ def run(client, ws, handle=None, now=None, log=None, full=False):
                     state = "error"
                     errors.append({"handle": h, "code": "parse", "message": e.message})
             else:
-                write_bytes(os.path.join(raw, "detail-%d.txt" % resp.status), resp.body)
+                raw_files["detail-%d.txt" % resp.status] = resp.body
                 if resp.status == 403:
                     state = "needs-join"
                 else:
                     state = "error"
                     errors.append({"handle": h, "code": "api", "message": "detail HTTP %d" % resp.status})
+            if resp is not None:
+                store.mark_detail_checked(h, ts, resp.status)
             log("progress: %d/%d %s" % (done, total, h))
         fs = firsts.get(r.get("id"))
         try:
@@ -257,7 +291,13 @@ def run(client, ws, handle=None, now=None, log=None, full=False):
         counts[key] += 1
         data = dumps(prog).encode("utf-8")
         write_bytes(store.program_path(h), data)
-        write_bytes(store.snapshot_path(h, ts), data)
+        # CONTRACTS §11.2: a snapshot + raw/<ts>/ only when the profile or raw records changed.
+        if _changed_since_last_snapshot(store, h, prog, raw_files):
+            write_bytes(store.snapshot_path(h, ts), data)
+            raw = store.raw_dir(h, ts)
+            for name, body in raw_files.items():
+                write_bytes(os.path.join(raw, name), body)
+            snapshots.append(h)
         handles.append(h)
 
     index = {
@@ -268,6 +308,7 @@ def run(client, ws, handle=None, now=None, log=None, full=False):
         "mode": "full" if (full or handle) else "incremental",
         "detail_fetched": sorted(plan),
         "handles": sorted(handles),
+        "snapshots": sorted(snapshots),
         "counts": counts,
         "requests": client.requests,
         "errors": errors,

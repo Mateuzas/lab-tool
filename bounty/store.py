@@ -4,7 +4,7 @@ import datetime
 import glob
 import os
 
-from bounty.util import read_json, read_jsonl
+from bounty.util import read_json, read_jsonl, write_json
 
 
 class Store(object):
@@ -60,6 +60,22 @@ class Store(object):
     def activities(self):
         return read_jsonl(self.activities_path())
 
+    def detail_check_path(self, handle):
+        return os.path.join(self.program_dir(handle), "detail-checked.json")
+
+    def mark_detail_checked(self, handle, ts, status):
+        """Record a detail response even when its raw copy isn't kept (CONTRACTS §11.2)."""
+        write_json(self.detail_check_path(handle), {"ts": ts, "status": status})
+
+    def latest_raw_file(self, handle, name):
+        """Bytes of the newest raw/<ts>/<name>, or None."""
+        for d in sorted(glob.glob(os.path.join(self.program_dir(handle), "raw", "*")), reverse=True):
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                with open(p, "rb") as f:
+                    return f.read()
+        return None
+
     def last_detail_time(self, handle):
         """When the newest stored detail response (detail.json or detail-<status>.txt) was fetched:
         the UTC datetime of its raw/<ts>/ folder, or None if there is none."""
@@ -74,6 +90,9 @@ class Store(object):
                 continue
             if any(n == "detail.json" or (n.startswith("detail-") and n.endswith(".txt")) for n in names):
                 best = ts
+        chk = (read_json(self.detail_check_path(handle)) or {}).get("ts")
+        if isinstance(chk, str) and (best is None or chk > best):
+            best = chk
         if best is None:
             return None
         try:
