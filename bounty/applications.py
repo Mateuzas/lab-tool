@@ -23,6 +23,14 @@ def load(ws):
 
 
 def set_state(ws, handle, state, note=None, now=None):
+    """`none` removes the entry (the app's `a` key cycles back to no state)."""
+    if state == "none":
+        if not os.path.isfile(Store(ws).program_path(handle)):
+            raise BountyError("usage", "no program.json for %s" % handle, 64)
+        data = load(ws)
+        data.pop(handle, None)
+        write_json(path(ws), data)
+        return {"state": "none", "ts": iso(now or utcnow()), "note": ""}
     if state not in STATES:
         raise BountyError("usage", "unknown state %r (one of %s)" % (state, ", ".join(STATES)), 64)
     if not os.path.isfile(Store(ws).program_path(handle)):
