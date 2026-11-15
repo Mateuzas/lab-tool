@@ -81,6 +81,8 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | BE-7 | Backender | `hunter/` Claude copilot (see slice 2) | todo |
 | BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
 
+| BE-22 | Backender | Manual targets: `host/bounty manual add`, `legal_basis: authorization`, excluded from sync/rank/changes (CONTRACTS §2.1, ADR 010) | done |
+
 ## Later (in rough order, re-planned after each hunting session)
 
 | Id | Owner | Task |
