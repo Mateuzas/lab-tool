@@ -415,3 +415,26 @@ Hosts marked `new` are highlighted; out-of-scope ones are hidden behind a toggle
 `programs changes` adds `program-closed` when `status` goes from open to suspended/closed (and
 `program-reopened` back). Notify (§9.2) when it's the guard's active or a followed program:
 `<name> is now suspended — stop testing`.
+
+## 11. Private programs and manual targets in the app (BE-21, BE-23, FE-7)
+
+### 11.1 Application state (BE-21)
+`workspace/bounty/applications.json`: `{"<handle>": {"state": "applied|accepted|rejected|withdrawn",
+"ts": "<ISO>", "note": "<text>"}}`. Written only by the CLI:
+`host/bounty program apply-state <handle> <state> [--note TEXT]` (exit 64 on an unknown state or a
+handle without program.json). `access-granted` (§9.2) sets `accepted` automatically if the program
+was `applied`. `rank --json` items gain `"application": {"state","ts"} | null`.
+Tauri: `bounty_set_application(handle, state)` → `()`. UI: in the join list, `a` cycles
+none → applied → accepted → rejected → none for the selected program; the state shows as a tag.
+
+### 11.2 Sync hygiene (BE-14)
+A sync writes a program's `snapshots/<ts>.json` and `raw/<ts>/` only when its normalised profile or
+raw records changed since the previous snapshot (`changes` compares the newest snapshot ≤ cutoff,
+so behaviour is unchanged). `needs-join` details are re-checked when their last attempt is older
+than **24 h** (was 7 days).
+
+### 11.3 Manual targets in the app (BE-23)
+`bounty_use`, `bounty_guard_status` and the handle check accept `^(intigriti|manual)-[a-z0-9-]{1,100}$`.
+`bounty_manual_list()` → `[{handle, name, scope_in: int, scope_out: int, authorized_by, expires}]`
+from `programs/manual-*/program.json`. UI (FE-7): a compact **Manual targets** section under the
+ranked table (only when any exist) with the same `u`/`b`/`g` keys; no ranking factors shown.
