@@ -33,6 +33,10 @@ const programs = {
   "guard-error": ["loaded", null, "synced", "error"],
   "guard-refusals": ["loaded", async (p) => { await p.keyboard.press("R"); }, "synced", "refusals"],
   "guard-confirm": ["loaded", async (p) => { await p.keyboard.press("j"); await p.keyboard.press("j"); await p.keyboard.press("u"); }, "synced", "active"],
+  // Private programs and manual targets (FE-7)
+  "programs-applications": ["loaded", async (p) => { await p.keyboard.press("End"); await p.keyboard.press("k"); await p.keyboard.press("a"); }, "synced"],
+  "manual-active": ["loaded", async (p) => { await p.keyboard.press("End"); await p.keyboard.press("u"); await p.waitForFunction(() => document.querySelector("tr.manual.active")); }, "synced", "off"],
+  "shortcuts": ["loaded", async (p) => { await p.keyboard.press("?"); }, "synced"],
   "guard-lost": ["loaded", async (p) => { await p.waitForFunction(() => /press u/.test(document.querySelector("#pg-guard .g-text")?.textContent ?? ""), null, { timeout: 8000 }); }, "synced", "lost"],
 };
 const scenarios = only ?? [...lab, ...Object.keys(programs)];

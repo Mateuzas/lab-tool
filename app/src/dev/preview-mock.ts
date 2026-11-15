@@ -85,7 +85,15 @@ const programs = progMode.startsWith("empty") ? [] : ROWS.map(([handle, name, ur
   factors: { payout: f[0], findability: f[1], competition: f[2], friction: f[3] },
   inputs: { max_eur: i[0], min_eur: i[1], surface: i[2], days_since_scope_change: i[3], confidentiality: i[4], rate_limit_rps: i[5] },
   flags, excluded,
+  application: null as { state: string; ts: string } | null,
 }));
+// Application state (CONTRACTS §11.1) on the first few join programs.
+programs.filter((p) => !p.excluded && p.flags.includes("join")).slice(0, 3)
+  .forEach((p, n) => { p.application = { state: ["applied", "accepted", "rejected"][n], ts: iso(60 * 24 * (n + 2)) }; });
+// Manual targets (CONTRACTS §11.3): ?m=0 hides them.
+const MANUAL = new URLSearchParams(location.search).get("m") === "0" || progMode.startsWith("empty") ? [] : [
+  { handle: "manual-friends-site", name: "Friend's site", scope_in: 2, scope_out: 0, authorized_by: "Owner", expires: "2026-12-31" },
+];
 let lastSync: string | null = progMode.startsWith("empty") ? null : iso(14);
 const ranking = () => ({
   status: { last_sync_at: lastSync, programs: programs.length,
@@ -182,6 +190,13 @@ async function bountyRefresh(channel: { id: number }) {
     if (cmd === "bounty_guard_status") return guardStatus();
     if (cmd === "bounty_use") { await sleep(500); guard = gActive(args.handle); return guard; }
     if (cmd === "bounty_guard_stop") { await sleep(300); guard = G0; return null; }
+    if (cmd === "bounty_manual_list") return MANUAL;
+    if (cmd === "bounty_set_application") {
+      const p = programs.find((x) => x.handle === args.handle);
+      if (!p) throw `bounty: usage: no program ${args.handle}`;
+      p.application = args.state && args.state !== "none" ? { state: args.state, ts: iso(0) } : null;
+      return null;
+    }
     if (cmd === "bounty_open_burp") return guard.running ? null : "Burp opened. Use a program first, or Burp has no upstream proxy.";
     if (cmd === "open_program") {
       if (!String(args.url).startsWith("https://app.intigriti.com/")) throw "not an Intigriti program URL";
