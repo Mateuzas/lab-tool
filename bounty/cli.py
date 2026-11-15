@@ -10,6 +10,7 @@ from bounty import changes as changes_mod
 from bounty import guard as guard_mod
 from bounty import manual as manual_mod
 from bounty import rank as rank_mod
+from bounty import shell as shell_mod
 from bounty import sync as sync_mod
 from bounty.config import load_ranking
 from bounty.intigriti import Client
@@ -66,6 +67,9 @@ def build_parser():
     fl.add_argument("--handle", help="program (default: the active one)")
     fl.add_argument("--tail", type=int, default=50, help="last N lines (default 50)")
     fl.add_argument("--json", action="store_true")
+    sh = sub.add_parser("shell", help="a login shell in kali-bounty as hunter, every request through the guard")
+    sh.add_argument("--handle", help="work dir /bounty/work/<handle> (default: the active program); "
+                                     "never changes the guard's policy")
     prog = sub.add_parser("program", help="one program")
     prs = prog.add_subparsers(dest="cmd")
     u = prs.add_parser("use", help="make a program the guard's active profile "
@@ -278,6 +282,7 @@ def main(argv=None):
         ("program", "use"): lambda a, w: guard_mod.program_use(w, a.handle),
         ("manual", "add"): lambda a, w: manual_mod.add(w, a, sys.stdout),
         ("burp", None): cmd_burp,
+        ("shell", None): lambda a, w: shell_mod.shell(a.handle),
     }
     fn = handlers.get((args.group, getattr(args, "cmd", None)))
     if fn is None:
