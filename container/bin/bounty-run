@@ -17,6 +17,11 @@ A tool that ignores both just fails: iptables lets only the guard connect out.
 
 With --actor claude, active tools are refused (exit 6) when the program forbids automation
 (rate_limit_rps 0 or automation forbidden), and every command is refused when ai_use is forbidden.
+BOUNTY_HANDLE=<h> (set by `host/bounty shell --handle`, CONTRACTS §12.1) picks the work dir
+/bounty/work/<h> instead of the active program's and is passed on to the command; the guard's
+policy stays the active program's. A human login shell (`bash -l`) with BOUNTY_HANDLE starts as
+`bash --rcfile SHARE/bashrc -i`: the usual profile, then the prompt `[<h>] \\w $ ` (Kali's .bashrc
+would overwrite a PS1 from the environment).
 Exit: the command's own code; 6 refused; 64 usage.
 """
 
@@ -30,6 +35,8 @@ import guard_policy as gp  # noqa: E402
 SNAPSHOT = "/dev/shm/bounty-guard/policy.json"
 PORTS = {"human": 8080, "claude": 8082}
 HUNTER_HOME = "/home/hunter"
+SHELLRC = os.path.join(SHARE, "bashrc")
+LOGIN_BASH = (["bash", "-l"], ["bash", "--login"], ["/bin/bash", "-l"], ["/bin/bash", "--login"])
 
 # argv0 -> (header flag, proxy flag or None)
 TOOL_FLAGS = {
@@ -80,15 +87,28 @@ def program_rules():
     return automation, rules.get("ai_use") == "forbidden"
 
 
-def work_dir():
-    """/bounty/work/<active handle> (the only writable bind mount), created for hunter."""
+def shell_handle():
+    """BOUNTY_HANDLE if it is a valid handle, else None (work dir and prompt only, never policy)."""
+    h = os.environ.get("BOUNTY_HANDLE") or ""
+    return h if gp.HANDLE_RE.match(h) else None
+
+
+def shell_command(actor, cmd, handle):
+    """A human login bash with a shell handle gets the bounty rcfile (prompt [<h>]); else cmd."""
+    if actor == "human" and handle and list(cmd) in LOGIN_BASH and os.path.isfile(SHELLRC):
+        return [cmd[0], "--rcfile", SHELLRC, "-i"]
+    return list(cmd)
+
+
+def work_dir(handle=None):
+    """/bounty/work/<handle or active handle> (the only writable bind mount), created for hunter."""
     import json
-    handle = None
-    try:
-        with open(SNAPSHOT) as f:
-            handle = json.load(f).get("handle")
-    except (OSError, ValueError):
-        pass
+    if not handle:
+        try:
+            with open(SNAPSHOT) as f:
+                handle = json.load(f).get("handle")
+        except (OSError, ValueError):
+            pass
     base = "/bounty/work"
     if not os.path.isdir(base):
         return HUNTER_HOME
@@ -146,7 +166,8 @@ def main():
         label = "tool:unknown"
     proxy = "http://127.0.0.1:%d" % PORTS[actor]
 
-    args = list(cmd)
+    handle = shell_handle()
+    args = shell_command(actor, cmd, handle)
     flags = TOOL_FLAGS.get(name)
     if flags:
         extra = []
@@ -162,9 +183,11 @@ def main():
         "LANG": os.environ.get("LANG", "C.UTF-8"), "TERM": os.environ.get("TERM", "dumb"),
         "BOUNTY_ACTOR": label,
     }
+    if handle:
+        env["BOUNTY_HANDLE"] = handle
     for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         env[k] = proxy
-    os.chdir(work_dir())
+    os.chdir(work_dir(handle))
     setpriv = ["setpriv", "--reuid=hunter", "--regid=hunter", "--init-groups", "--no-new-privs",
                "--inh-caps=-all", "--bounding-set=-all", "--"]
     try:

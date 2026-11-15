@@ -209,6 +209,18 @@ async fn bounty_manual_list() -> Result<Vec<bounty::ManualTarget>, String> {
     tauri::async_runtime::spawn_blocking(bounty::manual_list).await.map_err(|e| e.to_string())?
 }
 
+/// Terminal.app with a shell in kali-bounty as hunter, through the guard (CONTRACTS §12.3).
+#[tauri::command]
+async fn bounty_open_shell() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(bounty::open_shell).await.map_err(|e| e.to_string())?
+}
+
+/// Terminal.app with the Claude copilot in hunter/ (CONTRACTS §12.3).
+#[tauri::command]
+async fn bounty_open_hunter() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(bounty::open_hunter).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -222,7 +234,7 @@ pub fn run() {
             claude_status, open_tutor,
             bounty_ranking, bounty_refresh, open_program,
             bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state,
-            bounty_set_application, bounty_manual_list
+            bounty_set_application, bounty_manual_list, bounty_open_shell, bounty_open_hunter
         ])
         .setup(|app| {
             bounty::spawn_timer(app.handle().clone());

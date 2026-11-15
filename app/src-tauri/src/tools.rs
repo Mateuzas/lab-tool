@@ -51,7 +51,7 @@ fn wireshark_bin() -> Option<PathBuf> {
 
 /// Where Claude Code's installer and Homebrew put the `claude` command. GUI apps don't get the
 /// user's shell PATH, so look in the known places.
-fn claude_bin() -> Option<PathBuf> {
+pub(crate) fn claude_bin() -> Option<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
     [home.join(".local/bin/claude"), home.join(".claude/local/claude"),
      PathBuf::from("/opt/homebrew/bin/claude"), PathBuf::from("/usr/local/bin/claude")]
@@ -60,12 +60,12 @@ fn claude_bin() -> Option<PathBuf> {
 }
 
 /// Quote for a POSIX shell: wrap in single quotes, escape embedded ones.
-fn sh_quote(s: &str) -> String {
+pub(crate) fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
 /// Quote for an AppleScript string literal.
-fn applescript_quote(s: &str) -> String {
+pub(crate) fn applescript_quote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
@@ -164,9 +164,22 @@ pub fn claude_status() -> ToolStatus {
 pub fn open_tutor() -> Result<(), String> {
     let bin = claude_bin().ok_or("Claude Code isn't installed.")?;
     let dir = std::fs::canonicalize(TUTOR_DIR).map_err(|_| "The tutor folder is missing.".to_string())?;
-    let cmd = format!("cd {} && {}", sh_quote(&dir.to_string_lossy()), sh_quote(&bin.to_string_lossy()));
-    let script = format!("tell application \"Terminal\"\nactivate\ndo script {}\nend tell", applescript_quote(&cmd));
-    let ok = Command::new("osascript").arg("-e").arg(script).status().map_err(|e| e.to_string())?;
+    open_terminal(&cd_and_run(&dir, &bin))
+}
+
+/// `cd '<dir>' && '<bin>'`, both shell-quoted.
+pub(crate) fn cd_and_run(dir: &std::path::Path, bin: &std::path::Path) -> String {
+    format!("cd {} && {}", sh_quote(&dir.to_string_lossy()), sh_quote(&bin.to_string_lossy()))
+}
+
+/// AppleScript that opens a new Terminal.app window running the shell command `cmd`.
+pub(crate) fn terminal_script(cmd: &str) -> String {
+    format!("tell application \"Terminal\"\nactivate\ndo script {}\nend tell", applescript_quote(cmd))
+}
+
+/// Run `cmd` in a new Terminal.app window (osascript `do script`).
+pub(crate) fn open_terminal(cmd: &str) -> Result<(), String> {
+    let ok = Command::new("osascript").arg("-e").arg(terminal_script(cmd)).status().map_err(|e| e.to_string())?;
     if ok.success() { Ok(()) } else { Err("Couldn't open a Terminal window.".into()) }
 }
 

@@ -1,0 +1,12 @@
+# Sourced by bounty-run for `host/bounty shell` (CONTRACTS §12.1) in place of a login shell's
+# startup files: the usual login profile (which loads Kali's ~/.bashrc), then the bounty prompt.
+# BOUNTY_HANDLE is checked against the handle pattern by bounty-run before it gets here.
+# shellcheck shell=bash disable=SC1090,SC1091
+[ -r /etc/profile ] && . /etc/profile
+for __f in ~/.bash_profile ~/.bash_login ~/.profile; do
+  if [ -r "$__f" ]; then . "$__f"; break; fi
+done
+unset __f
+if [ -n "${BOUNTY_HANDLE:-}" ]; then
+  PS1="[$BOUNTY_HANDLE] \\w \$ "
+fi
