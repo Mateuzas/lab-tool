@@ -3,7 +3,7 @@ SHELL := /bin/bash
 SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh) $(wildcard scripts/*.sh) container/bin/bounty-firewall container/bin/bounty-guard container/bin/bounty-supervisor
 VPN ?= starting
 
-.PHONY: help build up down status lint secrets-check test test-target clean app-dev app-test app-build app-shots
+.PHONY: help build up down status lint secrets-check test test-target clean app-dev app-test app-build app-install app-shots
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -53,6 +53,11 @@ app-test: ## type-check the UI, run Rust unit tests (no Docker needed)
 
 app-build: ## build the release .app / .dmg
 	cd app && npm install --silent && $(CARGO_PATH) npm run tauri build
+
+app-install: app-build ## build the app and copy it to /Applications (replaces an older copy)
+	rm -rf "/Applications/Lab Tool.app"
+	cp -R "app/src-tauri/target/release/bundle/macos/Lab Tool.app" /Applications/
+	@echo "installed /Applications/Lab Tool.app"
 
 app-shots: ## screenshots of every UI state (light + dark) into app/ui-shots/ (needs `make app-dev` or `npm run dev`)
 	cd app && mkdir -p ui-shots && node scripts/ui-shots.mjs ui-shots light && node scripts/ui-shots.mjs ui-shots dark
