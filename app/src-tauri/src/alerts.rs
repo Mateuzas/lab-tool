@@ -136,6 +136,9 @@ pub fn text_for(ev: &ChangeEvent, ctx: &Context) -> Option<String> {
             }
             format!("{name}: bounty up to {}", euros(to))
         }
+        "program-closed" if active || ctx.following.contains(&ev.handle) => {
+            format!("{name} is now {} — stop testing", s(d, "to").unwrap_or("closed"))
+        }
         "rules-changed" if active => format!("{name}: rules changed — re-read before testing"),
         _ => return None,
     };
@@ -260,6 +263,17 @@ mod tests {
                    Some("Active Co: rules changed — re-read before testing"));
         assert_eq!(text_for(&ev("intigriti-top", "rules-changed", json!({})), &c), None);
         assert_eq!(text_for(&ev("intigriti-act", "scope-removed", json!({"list": "in", "value": "x"})), &c), None);
+    }
+
+    #[test]
+    fn program_closed_rule() {
+        let mut c = ctx();
+        c.following.insert("intigriti-fol".into());
+        let closed = |h: &str| ev(h, "program-closed", json!({"name": "Acme", "from": "open", "to": "suspended"}));
+        assert_eq!(text_for(&closed("intigriti-act"), &c).as_deref(), Some("Acme is now suspended — stop testing"));
+        assert_eq!(text_for(&closed("intigriti-fol"), &c).as_deref(), Some("Acme is now suspended — stop testing"));
+        assert_eq!(text_for(&closed("intigriti-top"), &c), None);
+        assert_eq!(text_for(&ev("intigriti-act", "program-reopened", json!({"name": "Acme"})), &c), None);
     }
 
     #[test]

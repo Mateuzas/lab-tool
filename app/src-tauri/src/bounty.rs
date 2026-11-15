@@ -63,6 +63,15 @@ pub struct RankedProgram {
     pub inputs: Inputs,
     pub flags: Vec<String>,
     pub excluded: Option<String>,
+    /// `{state, ts}` from applications.json (CONTRACTS §11.1); null when none.
+    #[serde(default)]
+    pub application: Option<Application>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Application {
+    pub state: String,
+    pub ts: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -345,9 +354,9 @@ pub struct GuardStatus {
 
 const GUARD_STATUSES: &[&str] = &["active", "no-profile", "error", "down", "starting"];
 
-/// `^intigriti-[a-z0-9-]{1,100}$`, checked before anything is spawned.
+/// `^(intigriti|manual)-[a-z0-9-]{1,100}$` (CONTRACTS §11.3), checked before anything is spawned.
 pub fn handle_ok(handle: &str) -> bool {
-    handle.strip_prefix("intigriti-").is_some_and(|rest| {
+    handle.strip_prefix("intigriti-").or_else(|| handle.strip_prefix("manual-")).is_some_and(|rest| {
         (1..=100).contains(&rest.len()) && rest.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
     })
 }
@@ -423,7 +432,7 @@ pub fn guard_stop_if_running() -> Result<(), String> {
 
 pub fn use_program(handle: &str) -> Result<GuardStatus, String> {
     if !handle_ok(handle) {
-        return Err("Not an Intigriti program handle.".into());
+        return Err("Not a program handle.".into());
     }
     let repo = repo_dir()?;
     if !guard_status()?.running {
@@ -431,6 +440,72 @@ pub fn use_program(handle: &str) -> Result<GuardStatus, String> {
     }
     run_plain(&repo, "scripts/secrets.sh", &["exec", "intigriti", "--", "host/bounty", "program", "use", handle])?;
     guard_status()
+}
+
+/// Application states the app may set (CONTRACTS §11.1); `none` clears it.
+pub const APPLICATION_STATES: &[&str] = &["none", "applied", "accepted", "rejected", "withdrawn"];
+
+pub fn set_application(handle: &str, state: &str) -> Result<(), String> {
+    if !handle.starts_with("intigriti-") || !handle_ok(handle) {
+        return Err("Not an Intigriti program handle.".into());
+    }
+    if !APPLICATION_STATES.contains(&state) {
+        return Err(format!("Unknown application state {state:?}."));
+    }
+    run_plain(&repo_dir()?, "host/bounty", &["program", "apply-state", handle, state]).map(|_| ())
+}
+
+/// One manual target for the app (CONTRACTS §11.3).
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub struct ManualTarget {
+    pub handle: String,
+    pub name: String,
+    pub scope_in: u64,
+    pub scope_out: u64,
+    pub authorized_by: Option<String>,
+    pub expires: Option<String>,
+}
+
+/// A `programs/manual-*/program.json` -> ManualTarget (None if it isn't a valid manual profile).
+pub fn parse_manual(v: &Value) -> Option<ManualTarget> {
+    let handle = str_of(v, "handle")?;
+    if !handle.starts_with("manual-") || !handle_ok(&handle) || str_of(v, "platform").as_deref() != Some("manual") {
+        return None;
+    }
+    let count = |k: &str| v.get("scope").and_then(|s| s.get(k)).and_then(Value::as_array).map_or(0, |a| a.len() as u64);
+    let auth = v.get("authorization").cloned().unwrap_or(Value::Null);
+    Some(ManualTarget {
+        name: str_of(v, "name").unwrap_or_else(|| handle.clone()),
+        handle,
+        scope_in: count("in"),
+        scope_out: count("out"),
+        authorized_by: str_of(&auth, "owner"),
+        expires: str_of(&auth, "expires"),
+    })
+}
+
+/// BOUNTY_WORKSPACE, default <repo>/workspace/bounty (as bounty/util.py).
+fn workspace_dir() -> Result<PathBuf, String> {
+    match std::env::var("BOUNTY_WORKSPACE") {
+        Ok(p) if !p.is_empty() => Ok(PathBuf::from(p)),
+        _ => Ok(repo_dir()?.join("workspace").join("bounty")),
+    }
+}
+
+pub fn manual_list_in(programs_dir: &std::path::Path) -> Vec<ManualTarget> {
+    let Ok(entries) = std::fs::read_dir(programs_dir) else { return vec![] };
+    let mut out: Vec<ManualTarget> = entries.flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("manual-"))
+        .filter_map(|e| std::fs::read(e.path().join("program.json")).ok())
+        .filter_map(|b| serde_json::from_slice::<Value>(&b).ok())
+        .filter_map(|v| parse_manual(&v))
+        .collect();
+    out.sort_by(|a, b| a.handle.cmp(&b.handle));
+    out
+}
+
+pub fn manual_list() -> Result<Vec<ManualTarget>, String> {
+    Ok(manual_list_in(&workspace_dir()?.join("programs")))
 }
 
 /// The CLI's "already open" warning (`bounty: burp: …` on success) -> the note.
@@ -529,18 +604,73 @@ mod tests {
         let back = serde_json::to_value(&p).unwrap();
         assert_eq!(back["inputs"]["detail"], "ok");
         assert_eq!(back["inputs"]["rate_limit_rps"], 5.0);
+        assert_eq!(back["application"], serde_json::Value::Null);
+        let with_app = serde_json::json!({
+            "handle": "intigriti-b", "name": "B", "url": "", "total": 0.5,
+            "factors": {"payout": null, "findability": null, "competition": null, "friction": null},
+            "inputs": {"max_eur": null, "min_eur": null, "surface": null, "days_since_scope_change": null,
+                       "confidentiality": "application", "rate_limit_rps": null},
+            "flags": ["join"], "excluded": null, "application": {"state": "applied", "ts": "2026-11-15T10:00:00Z"}});
+        let p: RankedProgram = serde_json::from_value(with_app).unwrap();
+        assert_eq!(p.application.as_ref().map(|a| a.state.as_str()), Some("applied"));
     }
 
     #[test]
     fn handles_validated() {
         assert!(handle_ok("intigriti-dropbox"));
         assert!(handle_ok(&format!("intigriti-{}", "a".repeat(100))));
+        assert!(handle_ok("manual-friends-site"));
+        assert!(!handle_ok("manual-"));
+        assert!(!handle_ok("manual-A"));
+        assert!(!handle_ok("other-x"));
         for bad in ["", "intigriti-", "dropbox", "intigriti-Dropbox", "intigriti-a b", "intigriti-a;rm",
                     "intigriti-../x", "intigriti-a\n", "-intigriti-a", " intigriti-a", "intigriti-é",
                     &format!("intigriti-{}", "a".repeat(101))] {
             assert!(!handle_ok(bad), "{bad:?}");
             assert!(use_program(bad).is_err());
         }
+    }
+
+    #[test]
+    fn manual_profiles_parsed() {
+        let v = serde_json::json!({
+            "schema": 1, "handle": "manual-friends-site", "platform": "manual", "name": "Friend's site",
+            "scope": {"in": [{"type": "domain", "value": "a.example"}, {"type": "wildcard", "value": "*.a.example"}],
+                      "out": [{"type": "url", "value": "https://a.example/admin"}]},
+            "legal_basis": "authorization",
+            "authorization": {"owner": "Jonas", "note_path": null, "granted_at": "t", "expires": "2026-12-31"}
+        });
+        assert_eq!(parse_manual(&v), Some(ManualTarget {
+            handle: "manual-friends-site".into(), name: "Friend's site".into(), scope_in: 2, scope_out: 1,
+            authorized_by: Some("Jonas".into()), expires: Some("2026-12-31".into()),
+        }));
+        let mut no_auth = v.clone();
+        no_auth.as_object_mut().unwrap().remove("authorization");
+        let m = parse_manual(&no_auth).unwrap();
+        assert_eq!((m.authorized_by, m.expires), (None, None));
+        let mut intig = v.clone();
+        intig["platform"] = "intigriti".into();
+        assert_eq!(parse_manual(&intig), None);
+        let mut bad = v.clone();
+        bad["handle"] = "manual-../x".into();
+        assert_eq!(parse_manual(&bad), None);
+    }
+
+    #[test]
+    fn manual_list_reads_only_manual_dirs() {
+        let dir = std::env::temp_dir().join(format!("kali-lab-manual-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for (h, platform) in [("manual-b", "manual"), ("manual-a", "manual"), ("intigriti-x", "intigriti")] {
+            std::fs::create_dir_all(dir.join(h)).unwrap();
+            let p = serde_json::json!({"handle": h, "platform": platform, "name": h, "scope": {"in": [], "out": []}});
+            std::fs::write(dir.join(h).join("program.json"), p.to_string()).unwrap();
+        }
+        std::fs::create_dir_all(dir.join("manual-broken")).unwrap();
+        std::fs::write(dir.join("manual-broken").join("program.json"), "{").unwrap();
+        let got: Vec<String> = manual_list_in(&dir).into_iter().map(|m| m.handle).collect();
+        assert_eq!(got, vec!["manual-a", "manual-b"]);
+        assert!(manual_list_in(&dir.join("missing")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

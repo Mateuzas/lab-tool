@@ -197,6 +197,18 @@ async fn bounty_open_burp() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(bounty::open_burp).await.map_err(|e| e.to_string())?
 }
 
+/// Record the application state of a private program (CONTRACTS §11.1).
+#[tauri::command]
+async fn bounty_set_application(handle: String, state: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::set_application(&handle, &state)).await.map_err(|e| e.to_string())?
+}
+
+/// Manual targets from the workspace (CONTRACTS §11.3), no network.
+#[tauri::command]
+async fn bounty_manual_list() -> Result<Vec<bounty::ManualTarget>, String> {
+    tauri::async_runtime::spawn_blocking(bounty::manual_list).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -209,7 +221,8 @@ pub fn run() {
             burp_status, open_burp, wireshark_status, watch_traffic, get_tool,
             claude_status, open_tutor,
             bounty_ranking, bounty_refresh, open_program,
-            bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state
+            bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state,
+            bounty_set_application, bounty_manual_list
         ])
         .setup(|app| {
             bounty::spawn_timer(app.handle().clone());

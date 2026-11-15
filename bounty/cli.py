@@ -73,7 +73,7 @@ def build_parser():
     u.add_argument("handle")
     ap = prs.add_parser("apply-state", help="record where your application to a private program stands")
     ap.add_argument("handle")
-    ap.add_argument("state", help="applied | accepted | rejected | withdrawn")
+    ap.add_argument("state", help="applied | accepted | rejected | withdrawn | none (clear)")
     ap.add_argument("--note", default=None)
     man = sub.add_parser("manual", help="a target you were authorised to test directly (not a platform program)")
     ms = man.add_subparsers(dest="cmd")
