@@ -1,6 +1,6 @@
 # Entry points for humans and CI. Run `make help`.
 SHELL := /bin/bash
-SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh) $(wildcard scripts/*.sh) container/bin/bounty-firewall container/bin/bounty-guard container/bin/bounty-supervisor
+SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh) $(wildcard scripts/*.sh) container/bin/bounty-firewall container/bin/bounty-guard container/bin/bounty-supervisor container/share/bounty/bashrc
 VPN ?= starting
 
 .PHONY: help build up down status lint secrets-check test test-target clean app-dev app-test app-build app-install app-shots

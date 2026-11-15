@@ -47,9 +47,9 @@ Follow-ups from slice 1b:
 
 | Id | Owner | Task | Status |
 |---|---|---|---|
-| BE-14 | Backender | Write a program's snapshot/raw only when it changed (each sync writes ~470 files now); re-check `needs-join` programs daily instead of weekly, so a newly joined program shows its scope the next day | todo |
-| FE-3 | Frontender | `?` shortcut overlay; industry in the filter once `RankedProgram` carries it (CONTRACTS §9 change, Architect) | todo |
-| OPS-5 | DevOps | Install the built app: `make app-install` copies `Lab Tool.app` to /Applications | todo |
+| BE-14 | Backender | Write a program's snapshot/raw only when it changed (each sync writes ~470 files now); re-check `needs-join` programs daily instead of weekly, so a newly joined program shows its scope the next day | done |
+| FE-3 | Frontender | `?` shortcut overlay; industry in the filter once `RankedProgram` carries it (CONTRACTS §9 change, Architect) | done |
+| OPS-5 | DevOps | Install the built app: `make app-install` copies `Lab Tool.app` to /Applications | done |
 
 ## Slice 2: scope guard (before any request to a target)
 
@@ -60,9 +60,9 @@ Follow-ups from slice 1b:
 | BE-6 | Backender | `program use` wires the active profile and the header value; Burp launch with upstream proxy `127.0.0.1:8081` | BE-5 | done (#14, #17; verified on www.dropbox.com) | Burp request to an in-scope test host shows in the flow log; out-of-scope gets the 403 |
 | BE-16 | Backender | Tauri commands of CONTRACTS §9.1; `start_lab` stops the guard | BE-6 | done (#19) | Rust tests (handle validation, status parsing); works from the built app |
 | FE-4 | Frontender | Guard controls on the Programs screen (CONTRACTS §9.1: `u`, `b`, `g`, header status, active row) | – (mock) | done (#20) | type-check, build, ui-shots of guard off/active/error |
-| BE-7 | Backender | `hunter/` Claude Code project: CLAUDE.md draft for the Architect, settings (read the program folder, Burp MCP read-only, `bounty-run --actor claude` only, approval per command) | BE-5 | todo | Claude can read a profile and run an approved in-scope `curl`, labelled `claude` in the log; an unapproved command doesn't run |
+| BE-7 | Backender | `hunter/` Claude Code project: CLAUDE.md draft for the Architect, settings (read the program folder, Burp MCP read-only, `bounty-run --actor claude` only, approval per command) | BE-5 | done | Claude can read a profile and run an approved in-scope `curl`, labelled `claude` in the log; an unapproved command doesn't run |
 | USER-3 | User | Dropbox prep: find your `@intigriti.me` alias in your Intigriti profile; create two free Dropbox test accounts with it (e.g. `you+a@intigriti.me`, `you+b@intigriti.me`, so you can test one account against the other) | – | todo | two test accounts exist |
-| USER-2 | User | **First hunting session** on the chosen program with the CLI + Burp; keep a friction list | BE-6 | todo | friction list → next slice |
+| USER-2 | User | **First hunting session** on the chosen program with the CLI + Burp; keep a friction list | BE-6 | doing | friction list → next slice |
 
 ## Strategy and next slices (agreed 2026-11-14)
 
@@ -74,13 +74,13 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 |---|---|---|---|
 | BE-17 | Backender | Background sync every 20 min + macOS notifications + `access-granted`/`access-lost` change kinds (CONTRACTS §9.2) | done (#24) |
 | FE-5 | Frontender | Status line "Next sync 14:20", reload on `bounty-synced`, recent alerts in the changes panel (CONTRACTS §9.2) | done (#23) |
-| BE-21 | Backender | Private programs: list of programs that need joining with their list-field rank, application state you mark by hand (applied / accepted / rejected), `access-granted` closes the loop | todo |
+| BE-21 | Backender | Private programs: list of programs that need joining with their list-field rank, application state you mark by hand (applied / accepted / rejected), `access-granted` closes the loop | done |
 | BE-18 | Backender | Recon (CONTRACTS §10): automatic passive (crt.sh + DNS, guard matcher), on-key active map of the active program (httpx + katana via the guard), `recon list`, `program-closed` kind, Tauri commands | in progress |
 | FE-6 | Frontender | Look-here panel (`l`), map key (`m`) with progress, new-host highlight (CONTRACTS §10.4) | in progress |
 | BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | todo |
 | BE-7 | Architect | `hunter/` Claude copilot (CONTRACTS §12.2) | done |
-| BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | doing |
-| FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | doing |
+| BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | done |
+| FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | done |
 | BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
 
 | BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | done (#31) |
