@@ -84,10 +84,38 @@ class TestIncremental(unittest.TestCase):
 
     def test_stale_detail_refetched_after_seven_days(self):
         self.again(NOW + datetime.timedelta(days=6, hours=23))
-        self.assertEqual(details(self.api.calls), [])
+        self.assertEqual(details(self.api.calls), ["p-b"])  # needs-join: rechecked after 24 h
+        self.api.calls = []
         _, lines = self.again(NOW + datetime.timedelta(days=7, hours=1))
-        self.assertEqual(details(self.api.calls), ["p-a", "p-b"])
-        self.assertEqual(lines, ["progress: 1/2 intigriti-acme", "progress: 2/2 intigriti-beta"])
+        self.assertEqual(details(self.api.calls), ["p-a"])
+        self.assertEqual(lines, ["progress: 1/1 intigriti-acme"])
+
+    def test_needs_join_rechecked_after_24h(self):
+        self.again(NOW + datetime.timedelta(hours=23))
+        self.assertEqual(details(self.api.calls), [])
+        idx, _ = self.again(NOW + datetime.timedelta(hours=25))
+        self.assertEqual(details(self.api.calls), ["p-b"])
+        self.assertEqual(idx["detail_fetched"], ["intigriti-beta"])
+        # the unchanged 403 is not stored again, but still counts as checked
+        self.api.calls = []
+        self.again(NOW + datetime.timedelta(hours=30))
+        self.assertEqual(details(self.api.calls), [])
+
+    def test_snapshot_only_on_change(self):
+        idx, _ = self.again()
+        self.assertEqual(idx["snapshots"], [])
+        snaps = os.listdir(os.path.join(self.ws, "programs", "intigriti-acme", "snapshots"))
+        raws = os.listdir(os.path.join(self.ws, "programs", "intigriti-acme", "raw"))
+        self.assertEqual((len(snaps), len(raws)), (1, 1))
+        self.api.records[1]["maxBounty"]["value"] = 5000.0
+        idx, _ = self.again(NOW + 2 * H)
+        self.assertEqual(idx["snapshots"], ["intigriti-beta"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), mock.patch.dict(os.environ, {"BOUNTY_WORKSPACE": self.ws}):
+            rc = cli.main(["programs", "changes", "--json"])
+        ev = json.loads(out.getvalue())
+        self.assertEqual(rc, 0)
+        self.assertEqual([(e["handle"], e["kind"]) for e in ev], [("intigriti-beta", "bounty-changed")])
 
     def test_failed_detail_is_retried_next_time(self):
         shutil.rmtree(self.ws)
