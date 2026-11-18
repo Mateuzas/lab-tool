@@ -181,8 +181,26 @@ async fn bounty_guard_status() -> Result<bounty::GuardStatus, String> {
 
 /// Start the guard if needed, then switch it to `handle`.
 #[tauri::command]
-async fn bounty_use(handle: String) -> Result<bounty::GuardStatus, String> {
-    tauri::async_runtime::spawn_blocking(move || bounty::use_program(&handle)).await.map_err(|e| e.to_string())?
+async fn bounty_use(app: AppHandle, handle: String) -> Result<bounty::GuardStatus, String> {
+    let h = handle.clone();
+    let st = tauri::async_runtime::spawn_blocking(move || bounty::use_program(&h)).await.map_err(|e| e.to_string())??;
+    // First use of a program: build its host list in the background (passive, CONTRACTS §10.1).
+    if bounty::needs_passive(&handle) {
+        bounty::spawn_passive(app, vec![handle]);
+    }
+    Ok(st)
+}
+
+/// The look-here rows for a program (CONTRACTS §10.4).
+#[tauri::command]
+async fn bounty_recon_list(handle: String) -> Result<Vec<bounty::ReconRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::recon_list(&handle)).await.map_err(|e| e.to_string())?
+}
+
+/// Map the guard's active program through the guard, progress on the channel. One at a time.
+#[tauri::command]
+async fn bounty_recon_map(app: AppHandle, on_event: Channel<bounty::SyncEvent>, state: State<'_, bounty::Bounty>) -> Result<(), String> {
+    state.recon_map(app, on_event).await
 }
 
 /// Stop the guard (never purges).
@@ -234,7 +252,8 @@ pub fn run() {
             claude_status, open_tutor,
             bounty_ranking, bounty_refresh, open_program,
             bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state,
-            bounty_set_application, bounty_manual_list, bounty_open_shell, bounty_open_hunter
+            bounty_set_application, bounty_manual_list, bounty_open_shell, bounty_open_hunter,
+            bounty_recon_list, bounty_recon_map
         ])
         .setup(|app| {
             bounty::spawn_timer(app.handle().clone());

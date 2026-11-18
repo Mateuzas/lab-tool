@@ -410,6 +410,35 @@ host/bounty flows export test-acme "$exp" >/dev/null 2>&1
 ls "$exp"/test-acme-flows-*/"$day".jsonl "$exp"/test-acme-flows-*/"$day".mitm >/dev/null 2>&1 \
   && check ok "host/bounty flows export copies .jsonl + .mitm to a Mac folder" || check bad "host/bounty flows export copies .jsonl + .mitm to a Mac folder"
 
+echo "== (p) recon map: only in-scope hosts, through the guard as tools (CONTRACTS §10.2)"
+use test-acme
+# Written from the Mac side, like `recon passive` does: the container must still be able to add to it.
+mkdir -p "$WS/work/test-acme/recon"
+cat > "$WS/work/test-acme/recon/hosts.jsonl" <<'EOF'
+{"host": "app.acme.test", "scope": "in-scope", "resolves": true, "first_seen": "2026-11-01T00:00:00Z"}
+{"host": "community.acme.test", "scope": "out-of-scope", "resolves": true, "first_seen": "2026-11-01T00:00:00Z"}
+{"host": "unrelated.test", "scope": "in-scope", "resolves": true, "first_seen": "2026-11-01T00:00:00Z"}
+EOF
+before=$(flows test-acme | wc -l)
+host/bounty recon map >"$WS/map.out" 2>"$WS/map.err"; rc=$?
+expect "$rc" 0 "recon map exits 0"
+grep -q "bounty: progress: 3/3 done" "$WS/map.err" && check ok "recon map streams progress" || check bad "recon map streams progress ($(tail -2 "$WS/map.err"))"
+got=$(python3 -c 'import json,sys; print(sorted({json.loads(l)["host"] for l in open(sys.argv[1]) if l.strip()}))' "$WS/work/test-acme/recon/live.jsonl" 2>/dev/null)
+expect "$got" "['acme.test', 'app.acme.test', 'other.test']" "mapped: scope entries + in-scope resolving hosts; never out-of-scope or guard-refused names"
+got=$(python3 -c 'import json,sys; print(sorted({r["status"] for r in map(json.loads, open(sys.argv[1])) if r["host"]=="app.acme.test"}))' "$WS/work/test-acme/recon/live.jsonl" 2>/dev/null)
+expect "$got" "[200]" "httpx result recorded for app.acme.test"
+[ -s "$WS/work/test-acme/recon/urls.jsonl" ] && check ok "katana URLs recorded" || check bad "katana URLs recorded"
+sleep 1
+new=$(flows test-acme | tail -n +"$((before + 1))")
+for a in tool:httpx-toolkit tool:katana; do
+  n=$(echo "$new" | python3 -c 'import json,sys; print(sum(1 for l in sys.stdin if l.strip() and json.loads(l).get("actor")==sys.argv[1] and json.loads(l).get("decision")=="allowed"))' "$a")
+  [ "$n" -gt 0 ] && check ok "map traffic in the flow log as $a" || check bad "map traffic in the flow log as $a"
+done
+n=$(echo "$new" | python3 -c 'import json,sys; print(sum(1 for l in sys.stdin if l.strip() and json.loads(l).get("host") in ("community.acme.test","unrelated.test")))')
+expect "$n" 0 "map sent nothing towards out-of-scope / not-in-scope names"
+got=$(host/bounty recon list test-acme --json | jget '[(r["host"], r["live"]) for r in d if r["host"]=="app.acme.test"]')
+expect "$got" "[('app.acme.test', True)]" "recon list shows the mapped host as live"
+
 echo "== (l) rate_limit_rps 0: only human traffic"
 use test-acme-norate
 expect "$(req human https://app.acme.test/l1)" "200 " "human (terminal, Burp) allowed"
@@ -420,6 +449,8 @@ line=$(flows test-acme-norate | grep '/l3' | head -1)
 expect "$(echo "$line" | jget '(d["actor"], d["decision"], d["reason"])')" "('tool:httpx-toolkit', 'refused', 'automation-forbidden')" "hunter tool refused automation-forbidden"
 docker exec "$C" bounty-run --actor claude -- ffuf -u https://app.acme.test/FUZZ -w /home/hunter/words >/dev/null 2>&1; rc=$?
 expect "$rc" 6 "bounty-run --actor claude with an active tool exits 6"
+host/bounty recon map >/dev/null 2>&1; rc=$?
+expect "$rc" 6 "recon map refused when the program forbids automation"
 
 echo "== (m) a profile that breaks while active: refuse all and say why"
 echo test-broken > "$WS/active"

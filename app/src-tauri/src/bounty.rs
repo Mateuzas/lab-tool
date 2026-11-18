@@ -21,6 +21,8 @@ use crate::tools;
 /// Repo root (dev builds use the repo's CLI, as for `tutor/`).
 const REPO_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
 const LAST_ALERTS: usize = 10;
+/// At most this many programs get automatic passive recon after one sync (CONTRACTS §10.4).
+pub const RECON_PER_SYNC: usize = 3;
 const PROGRAM_URL_PREFIX: &str = "https://app.intigriti.com/";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -102,11 +104,30 @@ fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
 }
 
-/// Managed state: at most one refresh at a time.
+/// Managed state: at most one refresh and one map at a time; passive recon runs one program at a time.
 #[derive(Default)]
 pub struct Bounty {
     refreshing: AtomicBool,
+    mapping: AtomicBool,
+    passive: Mutex<()>,
     alert_state: Mutex<alerts::AlertState>,
+}
+
+/// One row of `recon list --json` (CONTRACTS §10.3).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ReconRow {
+    pub host: String,
+    pub scope: String,
+    pub new: bool,
+    pub live: Option<bool>,
+    pub status: Option<i64>,
+    pub title: Option<String>,
+    #[serde(default)]
+    pub tech: Vec<String>,
+    pub urls: u32,
+    #[serde(default)]
+    pub signals: Vec<String>,
+    pub interest: f64,
 }
 
 /// Clears the "refresh running" flag however the refresh ends.
@@ -218,13 +239,114 @@ fn sync_blocking(on_progress: &dyn Fn(SyncEvent)) -> Result<Vec<ChangeEvent>, (S
 
 /// The notifications for a finished sync (CONTRACTS §9.2), from the cached ranking and the
 /// guard's active program (both local, read-only).
-fn alerts_for(changes: &[ChangeEvent]) -> Vec<String> {
+fn context() -> alerts::Context {
+    let programs = ranking().map(|r| r.programs).unwrap_or_default();
+    let active = guard_status().ok().and_then(|g| g.program);
+    alerts::Context::from_ranking(&programs, active)
+}
+
+/// Programs that get passive recon after a sync (CONTRACTS §10.1): a new in-scope wildcard on the
+/// active, a followed or a top-25 program (the notification rule), at most RECON_PER_SYNC, in order.
+pub fn passive_targets(changes: &[ChangeEvent], ctx: &alerts::Context) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for ev in changes {
+        let d = &ev.detail;
+        let wildcard_in = ev.kind == "scope-added"
+            && d.get("list").and_then(Value::as_str) == Some("in")
+            && d.get("type").and_then(Value::as_str) == Some("wildcard");
+        let watched = ctx.active.as_deref() == Some(ev.handle.as_str())
+            || ctx.following.contains(&ev.handle)
+            || ctx.top.contains(&ev.handle);
+        if wildcard_in && watched && handle_ok(&ev.handle) && !out.contains(&ev.handle) {
+            out.push(ev.handle.clone());
+            if out.len() == RECON_PER_SYNC {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// `recon passive <h>` (crt.sh + DNS, nothing sent to the program). Exit 3 = partial, still Ok.
+fn recon_passive_blocking(handle: &str) -> Result<(), String> {
+    let repo = repo_dir()?;
+    let out = cli(&repo, "host/bounty", &["recon", "passive", handle])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    match out.status.code() {
+        Some(0) | Some(3) => Ok(()),
+        _ => {
+            let lines: Vec<String> = String::from_utf8_lossy(&out.stderr).lines().map(str::to_string).collect();
+            Err(err_text(failure(&lines, "recon passive", out.status)))
+        }
+    }
+}
+
+/// Passive recon for `handles`, one after another in the background; `bounty-recon-updated`
+/// `{handle}` after each.
+pub fn spawn_passive(app: AppHandle, handles: Vec<String>) {
+    if handles.is_empty() {
+        return;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<Bounty>();
+        let _one = state.passive.lock().unwrap_or_else(|e| e.into_inner());
+        for h in handles {
+            if recon_passive_blocking(&h).is_ok() {
+                let _ = app.emit("bounty-recon-updated", serde_json::json!({ "handle": h }));
+            }
+        }
+    });
+}
+
+/// True when the program has no hosts.jsonl yet (passive recon runs when it is used).
+pub fn needs_passive(handle: &str) -> bool {
+    handle_ok(handle)
+        && workspace_dir()
+            .map(|w| !w.join("work").join(handle).join("recon").join("hosts.jsonl").exists())
+            .unwrap_or(false)
+}
+
+pub fn recon_list(handle: &str) -> Result<Vec<ReconRow>, String> {
+    if !handle_ok(handle) {
+        return Err("Not a program handle.".into());
+    }
+    let repo = repo_dir()?;
+    run_json(&repo, &["recon", "list", handle, "--json"], &[0]).map_err(err_text)
+}
+
+/// `recon map` for the guard's active program, progress streamed (CONTRACTS §10.2).
+fn recon_map_blocking(on_progress: &dyn Fn(SyncEvent)) -> Result<(), (String, String)> {
+    let repo = repo_dir().map_err(|m| ("failed".to_string(), m))?;
+    let mut child = cli(&repo, "host/bounty", &["recon", "map"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ("failed".to_string(), format!("couldn't start the map: {e}")))?;
+    let mut lines = Vec::new();
+    if let Some(stderr) = child.stderr.take() {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            match parse_progress(&line) {
+                Some(ev) => on_progress(ev),
+                None => lines.push(line),
+            }
+        }
+    }
+    let status = child.wait().map_err(|e| ("failed".to_string(), e.to_string()))?;
+    if !status.success() {
+        return Err(failure(&lines, "recon map", status));
+    }
+    Ok(())
+}
+
+fn alerts_for(changes: &[ChangeEvent], ctx: &alerts::Context) -> Vec<String> {
     if changes.is_empty() {
         return vec![];
     }
-    let programs = ranking().map(|r| r.programs).unwrap_or_default();
-    let active = guard_status().ok().and_then(|g| g.program);
-    alerts::select(changes, &alerts::Context::from_ranking(&programs, active))
+    alerts::select(changes, ctx)
 }
 
 impl Bounty {
@@ -250,15 +372,22 @@ impl Bounty {
                     let _ = app.emit("bounty-synced", &changes);
                 }
                 let c2 = changes.clone();
-                let texts = tauri::async_runtime::spawn_blocking(move || {
-                    let texts = alerts_for(&c2);
+                let (texts, recon) = tauri::async_runtime::spawn_blocking(move || {
+                    if c2.is_empty() {
+                        return (vec![], vec![]);
+                    }
+                    let ctx = context();
+                    let texts = alerts_for(&c2, &ctx);
                     for t in &texts {
                         let _ = alerts::notify(t);
                     }
-                    texts
+                    (texts, passive_targets(&c2, &ctx))
                 })
                 .await
                 .unwrap_or_default();
+                if let Some(app) = &app {
+                    spawn_passive(app.clone(), recon);
+                }
                 if !texts.is_empty() {
                     let ts = alerts::iso_utc(SystemTime::now());
                     let mut st = self.alert_state.lock().unwrap();
@@ -277,6 +406,30 @@ impl Bounty {
                 None => Err(format!("{code}: {message}")),
             },
         }
+    }
+
+    /// `bounty_recon_map`: one at a time; exactly one `done` (no changes) or `error` on the channel;
+    /// `bounty-recon-updated` for the active program afterwards (partial results count too).
+    pub async fn recon_map(&self, app: AppHandle, on_event: Channel<SyncEvent>) -> Result<(), String> {
+        if self.mapping.swap(true, Ordering::SeqCst) {
+            return Err("a map is already running".into());
+        }
+        let _guard = RefreshGuard(&self.mapping);
+        let handle = tauri::async_runtime::spawn_blocking(|| guard_status().ok().and_then(|g| g.program))
+            .await
+            .map_err(|e| e.to_string())?;
+        let ch = on_event.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || recon_map_blocking(&|ev| { let _ = ch.send(ev); }))
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(h) = handle {
+            let _ = app.emit("bounty-recon-updated", serde_json::json!({ "handle": h }));
+        }
+        match result {
+            Ok(()) => on_event.send(SyncEvent::Done { changes: vec![] }),
+            Err((code, message)) => on_event.send(SyncEvent::Error { code, message }),
+        }
+        .map_err(|e| e.to_string())
     }
 
     pub fn is_refreshing(&self) -> bool {
@@ -551,6 +704,61 @@ pub fn open_burp() -> Result<Option<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn change(handle: &str, kind: &str, detail: Value) -> ChangeEvent {
+        ChangeEvent { ts: String::new(), handle: handle.into(), kind: kind.into(), detail: detail.as_object().unwrap().clone() }
+    }
+
+    fn wildcard(handle: &str, list: &str) -> ChangeEvent {
+        change(handle, "scope-added", serde_json::json!({"list": list, "type": "wildcard", "value": "*.x.test"}))
+    }
+
+    #[test]
+    fn passive_only_for_new_in_scope_wildcards_on_watched_programs() {
+        let mut ctx = alerts::Context { active: Some("intigriti-act".into()), ..Default::default() };
+        ctx.following.insert("intigriti-fol".into());
+        ctx.top.insert("intigriti-top".into());
+        let changes = vec![
+            wildcard("intigriti-act", "in"),
+            wildcard("intigriti-act", "in"),                       // once per program
+            wildcard("intigriti-other", "in"),                     // not watched
+            wildcard("intigriti-fol", "out"),                      // out of scope: never
+            change("intigriti-fol", "scope-added", serde_json::json!({"list": "in", "type": "domain", "value": "a.x.test"})),
+            change("intigriti-top", "rules-changed", serde_json::json!({})),
+            wildcard("intigriti-fol", "in"),
+            wildcard("intigriti-top", "in"),
+        ];
+        assert_eq!(passive_targets(&changes, &ctx), vec!["intigriti-act", "intigriti-fol", "intigriti-top"]);
+    }
+
+    #[test]
+    fn passive_at_most_three_per_sync() {
+        let mut ctx = alerts::Context::default();
+        let changes: Vec<ChangeEvent> = (0..5).map(|i| {
+            let h = format!("intigriti-p{i}");
+            ctx.top.insert(h.clone());
+            wildcard(&h, "in")
+        }).collect();
+        assert_eq!(passive_targets(&changes, &ctx), vec!["intigriti-p0", "intigriti-p1", "intigriti-p2"]);
+    }
+
+    #[test]
+    fn passive_skips_bad_handles() {
+        let mut ctx = alerts::Context::default();
+        ctx.top.insert("../etc".into());
+        assert!(passive_targets(&[wildcard("../etc", "in")], &ctx).is_empty());
+    }
+
+    #[test]
+    fn recon_row_parses_the_cli_json() {
+        let rows: Vec<ReconRow> = serde_json::from_str(r#"[{"host":"a.x.test","scope":"in-scope","new":true,"live":null,
+            "status":null,"title":null,"tech":[],"urls":0,"signals":["api"],"interest":0.45}]"#).unwrap();
+        assert_eq!(rows[0].live, None);
+        assert_eq!(rows[0].signals, vec!["api"]);
+        let back = serde_json::to_value(&rows[0]).unwrap();
+        assert_eq!(back["live"], Value::Null);
+        assert_eq!(back["interest"], serde_json::json!(0.45));
+    }
 
     #[test]
     fn work_surface_needs_guard_and_program() {

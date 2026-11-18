@@ -10,6 +10,7 @@ from bounty import changes as changes_mod
 from bounty import guard as guard_mod
 from bounty import manual as manual_mod
 from bounty import rank as rank_mod
+from bounty import recon as recon_mod
 from bounty import shell as shell_mod
 from bounty import sync as sync_mod
 from bounty.config import load_ranking
@@ -93,6 +94,17 @@ def build_parser():
     ma.add_argument("--auth-note", metavar="PATH", help="path to the written authorisation (kept, not copied)")
     ma.add_argument("--expires", help="date the authorisation ends, e.g. 2026-12-31")
     ma.add_argument("--force", action="store_true", help="overwrite an existing manual target")
+
+    rc = sub.add_parser("recon", help="the look-here list (CONTRACTS §10)")
+    rcs = rc.add_subparsers(dest="cmd")
+    rp = rcs.add_parser("passive", help="crt.sh + DNS for a program's in-scope wildcards (no traffic to the program)")
+    rp.add_argument("handle")
+    rp.add_argument("--domain", help="query this base domain instead of every in-scope wildcard")
+    rm = rcs.add_parser("map", help="httpx + katana on the ACTIVE program's in-scope hosts, through the guard")
+    rm.add_argument("--limit", type=int, metavar="N", help="map at most N hosts")
+    rl = rcs.add_parser("list", help="hosts ranked by interest")
+    rl.add_argument("handle")
+    rl.add_argument("--json", action="store_true")
     return p
 
 
@@ -283,6 +295,9 @@ def main(argv=None):
         ("manual", "add"): lambda a, w: manual_mod.add(w, a, sys.stdout),
         ("burp", None): cmd_burp,
         ("shell", None): lambda a, w: shell_mod.shell(a.handle),
+        ("recon", "passive"): lambda a, w: recon_mod.passive(w, a.handle, a.domain),
+        ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit),
+        ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
     }
     fn = handlers.get((args.group, getattr(args, "cmd", None)))
     if fn is None:

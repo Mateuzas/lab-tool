@@ -374,11 +374,15 @@ program's own hosts runs only when the user presses a key, and only for the guar
 Names are classified with the guard's own matcher (`container/share/bounty/guard_policy.py`, imported
 by path, not copied): `in-scope` | `out-of-scope` | `not-in-scope`. Writes/merges
 `work/<handle>/recon/hosts.jsonl` (one line per name, updated in place):
-`{"host","sources":["crt.sh"],"first_seen","last_seen","scope":"in-scope|…","resolves":bool,"ips":[…]}`.
-Exit 0; 3 if crt.sh failed (partial results kept).
+`{"host","sources":["crt.sh"|"scope"],"first_seen","last_seen","scope":"in-scope|…","resolves":bool|null,"ips":[…]}`.
+In-scope `domain` and `url` entries are added as hosts too (source `scope`, no crt.sh query: their
+subdomains aren't in scope). Only in-scope names are looked up; others keep `resolves: null`.
+`recon/state.json` `{"baseline_at","passive_at"}`: hosts found by the first run are the baseline,
+never `new`. crt.sh gets a generic User-Agent (`kali-lab-recon/1`): nothing identifying leaves the Mac.
+Exit 0; 3 if crt.sh failed (partial results kept); 4 profile not enforceable; 64 usage.
 Triggered automatically by the app after a sync for every `scope-added` wildcard on the active,
 followed or top-25 programs (same rule as notifications), and on `program use` if `hosts.jsonl` is
-missing. Never for out-of-scope entries.
+missing (the app's `u`; the CLI `program use` doesn't query crt.sh). Never for out-of-scope entries.
 
 ### 10.2 Active mapping (on key, active program only, through the guard)
 `host/bounty recon map [--limit N]` → `docker exec kali-bounty bounty-run --actor human -- bounty-map`
@@ -390,6 +394,15 @@ max 300 URLs per live host, JS crawling on, same rate. Outputs `recon/live.jsonl
 `recon/urls.jsonl` (`{"host","url","method","source","ts"}`). Progress lines on stderr:
 `bounty: progress: <done>/<total> <host>`. All traffic is in the guard's flow log as `tool:httpx-toolkit`
 / `tool:katana`.
+Built (BE-18): targets are the in-scope `domain`/`url` entries, then in-scope resolving hosts from
+`hosts.jsonl`, each re-checked with the guard's matcher inside the container. One host at a time:
+httpx `-fhr` (same-host redirects only; `location` kept, so an off-site redirect shows without being
+followed) with `-irh`, so a guard refusal (`X-Bounty-Guard: refused; reason=…`) is recorded as
+`status: null, refused: <reason>` instead of a live 403; katana `-fs fqdn` (never leaves the host),
+5 min per host. `recon/mapped.json` `{"hosts":{host: ts}}` records what was probed. Results are saved
+after every host, also on interrupt. `bounty-map` exit: 0; 1 nothing to map; 6 the guard refused the
+tools (automation-forbidden); 130 interrupted. `recon map` exit: bounty-map's; 3 guard not running;
+5 no active program; 6 the profile forbids automation (checked before anything is sent).
 
 ### 10.3 The list
 `host/bounty recon list <handle> [--json]` merges hosts, live and urls into one row per host, sorted
@@ -397,7 +410,10 @@ by `interest` (0..1) then `first_seen` desc:
 `{"host","scope","new":bool (first_seen < 7 days),"live":bool|null,"status","title","tech","urls":int,
 "signals":["login","api","admin","upload","graphql","swagger","debug","js-heavy","redirect-offsite"],"interest"}`.
 `interest` = new 0.35 + live 0.15 + 0.1 per signal (cap 1). Signals come from paths/titles/tech by
-simple keyword rules in one table in the code (documented in the PR).
+simple keyword rules in one table in the code (`SIGNALS` in bounty/recon.py); host names count only
+by their subdomain labels (the program's own domain is never a signal). `live`: true = answered,
+false = probed by a map without an answer, null = never mapped. `new` = first_seen in the last 7 days
+and after the baseline run.
 
 ### 10.4 App
 | Command | Runs | Returns |
