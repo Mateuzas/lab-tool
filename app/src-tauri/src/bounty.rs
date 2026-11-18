@@ -3,7 +3,7 @@
 //! lives in the environment of the `scripts/secrets.sh exec` child; nothing here reads it, logs it
 //! or puts it in an event.
 
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -109,6 +109,7 @@ fn null_as_empty<'de, D: Deserializer<'de>>(d: D) -> Result<String, D::Error> {
 pub struct Bounty {
     refreshing: AtomicBool,
     mapping: AtomicBool,
+    ac_replaying: AtomicBool,
     passive: Mutex<()>,
     alert_state: Mutex<alerts::AlertState>,
 }
@@ -701,6 +702,281 @@ pub fn open_burp() -> Result<Option<String>, String> {
     run_plain(&repo_dir()?, "host/bounty", &["burp"]).map(|lines| burp_note(&lines))
 }
 
+// ---- Two-account access check (CONTRACTS §13.4) ----
+// Session header text crosses IPC once and goes only to the CLI's stdin: it is never put in argv,
+// an error message, a log line or an event.
+
+/// One account's session as `ac status --json` gives it: header names only, never values.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AcSession {
+    #[serde(default)]
+    pub names: Vec<String>,
+    #[serde(default)]
+    pub markers: u32,
+    #[serde(default)]
+    pub set_at: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AcStatus {
+    #[serde(default)]
+    pub handle: Option<String>,
+    #[serde(default)]
+    pub a: Option<AcSession>,
+    #[serde(default)]
+    pub b: Option<AcSession>,
+}
+
+/// One row of `ac candidates --json` (CONTRACTS §13.2).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AcCandidate {
+    pub flow_id: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub ts: String,
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub status: Option<i64>,
+    #[serde(default)]
+    pub length: Option<u64>,
+    #[serde(default)]
+    pub safe: bool,
+}
+
+/// One answer in a result: A's recorded one, or the B / no-session replay (CONTRACTS §13.3).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct AcVariant {
+    #[serde(default)]
+    pub status: Option<i64>,
+    #[serde(default)]
+    pub length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markers: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub a_ids: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verdict: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<String>,
+}
+
+/// One line of `ac results --json` (CONTRACTS §13.3).
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AcResult {
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub ts: String,
+    pub flow_id: String,
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub a: AcVariant,
+    #[serde(default)]
+    pub b: AcVariant,
+    #[serde(default)]
+    pub none: AcVariant,
+    #[serde(default)]
+    pub hint: Option<String>,
+}
+
+const AC_MAX_IDS: usize = 200;
+const AC_MAX_HEADERS: usize = 64 * 1024;
+const AC_MAX_MARKER: usize = 200;
+
+pub fn ac_who_ok(who: &str) -> bool {
+    who == "a" || who == "b"
+}
+
+/// `^[0-9a-f-]{8,64}$` (a mitmproxy flow id), and not starting with `-` so it can't read as an option.
+pub fn ac_id_ok(id: &str) -> bool {
+    (8..=64).contains(&id.len())
+        && !id.starts_with('-')
+        && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b) || b == b'-')
+}
+
+/// The arguments for `ac replay`, after checking every id. `--unsafe` ids must be among `ids`.
+pub fn ac_replay_args(ids: &[String], unsafe_ids: &[String]) -> Result<Vec<String>, String> {
+    if ids.is_empty() {
+        return Err("Pick at least one request to replay.".into());
+    }
+    if ids.len() > AC_MAX_IDS {
+        return Err(format!("At most {AC_MAX_IDS} requests per replay."));
+    }
+    if let Some(bad) = ids.iter().chain(unsafe_ids).find(|i| !ac_id_ok(i)) {
+        let mut shown: String = bad.chars().take(70).collect();
+        shown.retain(|c| !c.is_control());
+        return Err(format!("Not a flow id: {shown}"));
+    }
+    if unsafe_ids.iter().any(|u| !ids.contains(u)) {
+        return Err("A request allowed to change data isn't among the picked ones.".into());
+    }
+    let mut args: Vec<String> = vec!["ac".into(), "replay".into()];
+    args.extend(unsafe_ids.iter().map(|u| format!("--unsafe={u}")));
+    args.extend(ids.iter().cloned());
+    Ok(args)
+}
+
+/// `--marker=TEXT` arguments: trimmed, blank ones dropped, one line each and at most 200 characters.
+pub fn ac_marker_args(markers: &[String]) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for m in markers.iter().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+        if m.chars().any(char::is_control) || m.chars().count() > AC_MAX_MARKER {
+            return Err(format!("A marker is one line of at most {AC_MAX_MARKER} characters."));
+        }
+        out.push(format!("--marker={m}"));
+    }
+    Ok(out)
+}
+
+/// The (code, message) for a failed `ac` run, by exit code (CONTRACTS §13.4).
+fn ac_failure(code: Option<i32>, stderr_lines: &[String], what: &str, status: std::process::ExitStatus) -> (String, String) {
+    match code {
+        Some(3) => ("guard".into(), "Start the guard first.".into()),
+        Some(5) => ("no-program".into(), "Pick a program first.".into()),
+        Some(6) => ("automation-forbidden".into(),
+                    "This program forbids automated tools: compare the accounts by hand in Burp.".into()),
+        Some(64) => stderr_lines
+            .iter()
+            .rev()
+            .find_map(|l| parse_error(l).filter(|(c, _)| c == "usage"))
+            .unwrap_or_else(|| failure(stderr_lines, what, status)),
+        _ => failure(stderr_lines, what, status),
+    }
+}
+
+/// Run `host/bounty ac …`, `stdin` (if any) written to the CLI and closed; stdout on success.
+/// `what` names the run in errors and never includes argument values.
+fn ac_run(args: &[String], stdin: Option<&[u8]>, what: &str) -> Result<Vec<u8>, String> {
+    let repo = repo_dir()?;
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut cmd = cli(&repo, "host/bounty", &argv);
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if stdin.is_some() {
+        cmd.stdin(Stdio::piped());
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("couldn't run {what}: {e}"))?;
+    if let Some(data) = stdin {
+        if let Some(mut w) = child.stdin.take() {
+            // A write error means the CLI exited early; its exit code says why.
+            let _ = w.write_all(data);
+        } // dropped: stdin closed
+    }
+    let out = child.wait_with_output().map_err(|e| format!("{what}: {e}"))?;
+    if out.status.success() {
+        return Ok(out.stdout);
+    }
+    let lines: Vec<String> = String::from_utf8_lossy(&out.stderr).lines().map(str::to_string).collect();
+    Err(ac_failure(out.status.code(), &lines, what, out.status).1)
+}
+
+fn ac_json<T: serde::de::DeserializeOwned>(args: &[&str], what: &str) -> Result<T, String> {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let out = ac_run(&args, None, what)?;
+    serde_json::from_slice(&out).map_err(|e| format!("{what}: unexpected output ({e})"))
+}
+
+pub fn ac_status() -> Result<AcStatus, String> {
+    ac_json(&["ac", "status", "--json"], "ac status")
+}
+
+pub fn ac_set_session(who: &str, headers: String, markers: &[String]) -> Result<(), String> {
+    if !ac_who_ok(who) {
+        return Err("The account is a or b.".into());
+    }
+    if headers.trim().is_empty() {
+        return Err("Paste at least one header line (Cookie: …, Authorization: …).".into());
+    }
+    if headers.len() > AC_MAX_HEADERS {
+        return Err("That's more than 64 KB of headers. Paste only the session headers.".into());
+    }
+    if who == "b" && markers.iter().any(|m| !m.trim().is_empty()) {
+        return Err("Markers are for account A only.".into());
+    }
+    let mut args: Vec<String> = vec!["ac".into(), "session".into(), who.into()];
+    args.extend(ac_marker_args(markers)?);
+    let mut text = headers.into_bytes();
+    if text.last() != Some(&b'\n') {
+        text.push(b'\n');
+    }
+    let res = ac_run(&args, Some(&text), "ac session");
+    text.fill(0);
+    res.map(|_| ())
+}
+
+pub fn ac_clear_session(who: &str) -> Result<(), String> {
+    if !ac_who_ok(who) {
+        return Err("The account is a or b.".into());
+    }
+    let args: Vec<String> = ["ac", "session", who, "--clear"].iter().map(|s| s.to_string()).collect();
+    ac_run(&args, None, "ac session --clear").map(|_| ())
+}
+
+pub fn ac_candidates(since_hours: f64) -> Result<Vec<AcCandidate>, String> {
+    if !(since_hours.is_finite() && since_hours > 0.0 && since_hours <= 24.0 * 30.0) {
+        return Err("Look back between a minute and 30 days.".into());
+    }
+    let since = format!("{since_hours}");
+    ac_json(&["ac", "candidates", "--json", "--since", &since], "ac candidates")
+}
+
+pub fn ac_results() -> Result<Vec<AcResult>, String> {
+    ac_json(&["ac", "results", "--json"], "ac results")
+}
+
+/// `ac replay`, progress streamed to `on_progress`.
+fn ac_replay_blocking(args: &[String], on_progress: &dyn Fn(SyncEvent)) -> Result<(), (String, String)> {
+    let repo = repo_dir().map_err(|m| ("failed".to_string(), m))?;
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut child = cli(&repo, "host/bounty", &argv)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ("failed".to_string(), format!("couldn't start the replay: {e}")))?;
+    let mut lines = Vec::new();
+    if let Some(stderr) = child.stderr.take() {
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else { break };
+            match parse_progress(&line) {
+                Some(ev) => on_progress(ev),
+                None => lines.push(line),
+            }
+        }
+    }
+    let status = child.wait().map_err(|e| ("failed".to_string(), e.to_string()))?;
+    if !status.success() {
+        return Err(ac_failure(status.code(), &lines, "ac replay", status));
+    }
+    Ok(())
+}
+
+impl Bounty {
+    /// `bounty_ac_replay`: one at a time; exactly one `done` (no changes) or `error` on the channel;
+    /// `bounty-ac-updated` for the active program afterwards (partial results count too).
+    pub async fn ac_replay(&self, app: AppHandle, ids: Vec<String>, unsafe_ids: Vec<String>, on_event: Channel<SyncEvent>) -> Result<(), String> {
+        let args = ac_replay_args(&ids, &unsafe_ids)?;
+        if self.ac_replaying.swap(true, Ordering::SeqCst) {
+            return Err("a replay is already running".into());
+        }
+        let _guard = RefreshGuard(&self.ac_replaying);
+        let handle = tauri::async_runtime::spawn_blocking(|| guard_status().ok().and_then(|g| g.program))
+            .await
+            .map_err(|e| e.to_string())?;
+        let ch = on_event.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || ac_replay_blocking(&args, &|ev| { let _ = ch.send(ev); }))
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(h) = handle {
+            let _ = app.emit("bounty-ac-updated", serde_json::json!({ "handle": h }));
+        }
+        match result {
+            Ok(()) => on_event.send(SyncEvent::Done { changes: vec![] }),
+            Err((code, message)) => on_event.send(SyncEvent::Error { code, message }),
+        }
+        .map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -808,6 +1084,91 @@ mod tests {
             assert!(!program_url_ok(bad), "{bad:?} must be refused");
             assert!(open_program(bad).is_err());
         }
+    }
+
+    #[test]
+    fn ac_who_is_a_or_b() {
+        assert!(ac_who_ok("a") && ac_who_ok("b"));
+        for bad in ["", "A", "c", "ab", "a ", "--clear"] {
+            assert!(!ac_who_ok(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn ac_ids_validated() {
+        assert!(ac_id_ok("3f2a9c1e-77b0-4d1e-9a6f-0c2b8e5d4a10"));
+        assert!(ac_id_ok("deadbeef"));
+        for bad in ["dead", "DEADBEEF", "deadbeeg", "--unsafe", "-eadbeef00", "dead beef", "deadbeef;rm", &"a".repeat(65)] {
+            assert!(!ac_id_ok(bad), "{bad}");
+        }
+        let ids = vec!["aaaaaaaa-1".to_string(), "bbbbbbbb-2".to_string()];
+        assert_eq!(ac_replay_args(&ids, &["bbbbbbbb-2".into()]).unwrap(),
+                   vec!["ac", "replay", "--unsafe=bbbbbbbb-2", "aaaaaaaa-1", "bbbbbbbb-2"]);
+        assert!(ac_replay_args(&[], &[]).is_err());
+        assert!(ac_replay_args(&ids, &["cccccccc-3".into()]).is_err());
+        assert!(ac_replay_args(&["--help-me-x".into()], &[]).is_err());
+        assert!(ac_replay_args(&vec!["aaaaaaaa".to_string(); AC_MAX_IDS + 1], &[]).is_err());
+    }
+
+    #[test]
+    fn ac_markers_one_line_each() {
+        assert_eq!(ac_marker_args(&[" a@x.test ".into(), "".into(), "-1234567".into()]).unwrap(),
+                   vec!["--marker=a@x.test", "--marker=-1234567"]);
+        assert!(ac_marker_args(&["a\nb".into()]).is_err());
+        assert!(ac_marker_args(&["x".repeat(201)]).is_err());
+    }
+
+    #[test]
+    fn ac_session_checks_before_running() {
+        assert!(ac_set_session("c", "Cookie: s=1".into(), &[]).is_err());
+        assert!(ac_set_session("a", "  \n".into(), &[]).is_err());
+        assert!(ac_set_session("b", "Cookie: s=1".into(), &["a@x.test".into()]).is_err());
+        assert!(ac_set_session("a", "x".repeat(AC_MAX_HEADERS + 1), &[]).is_err());
+        assert!(ac_clear_session("ab").is_err());
+        assert!(ac_candidates(0.0).is_err());
+        assert!(ac_candidates(f64::NAN).is_err());
+    }
+
+    #[test]
+    fn ac_errors_by_exit_code() {
+        use std::os::unix::process::ExitStatusExt;
+        let st = std::process::ExitStatus::from_raw(1 << 8);
+        let none: Vec<String> = vec![];
+        assert_eq!(ac_failure(Some(3), &none, "ac status", st).1, "Start the guard first.");
+        assert_eq!(ac_failure(Some(5), &none, "ac status", st).1, "Pick a program first.");
+        assert_eq!(ac_failure(Some(6), &["bounty: automation-forbidden: x".into()], "ac replay", st).1,
+                   "This program forbids automated tools: compare the accounts by hand in Burp.");
+        let usage = vec!["usage: bounty ac ...".to_string(), "bounty: usage: no session for account B: set it first".to_string()];
+        assert_eq!(ac_failure(Some(64), &usage, "ac replay", st),
+                   ("usage".into(), "no session for account B: set it first".into()));
+        assert_eq!(ac_failure(Some(64), &["boom".into()], "ac replay", st).1, "ac replay failed: boom");
+        assert_eq!(ac_failure(Some(1), &["bounty: ac: docker exec failed".into()], "ac replay", st),
+                   ("ac".into(), "docker exec failed".into()));
+        assert_eq!(ac_failure(None, &none, "ac replay", st).0, "failed");
+    }
+
+    #[test]
+    fn ac_candidates_and_results_parse() {
+        let c: Vec<AcCandidate> = serde_json::from_str(r#"[{"flow_id":"3f2a9c1e-77b0","ts":"2026-11-18T10:00:00Z",
+            "method":"POST","url":"https://x.test/api/me?token=***","status":200,"length":512,"safe":false}]"#).unwrap();
+        assert_eq!(c[0].method, "POST");
+        assert!(!c[0].safe);
+        assert_eq!(c[0].length, Some(512));
+        let r: Vec<AcResult> = serde_json::from_str(r#"[{"ts":null,"flow_id":"3f2a9c1e-77b0","method":"GET","url":"https://x.test/a",
+            "a":{"status":200,"length":900},
+            "b":{"status":200,"length":880,"similarity":0.97,"markers":1,"a_ids":2,"verdict":"leak"},
+            "none":{"status":null,"length":0,"similarity":0.0,"markers":0,"a_ids":0,"verdict":"refused","refused":"out of scope"},
+            "hint":"likely-broken-access"}]"#).unwrap();
+        assert_eq!(r[0].ts, "");
+        assert_eq!(r[0].b.verdict.as_deref(), Some("leak"));
+        assert_eq!(r[0].none.refused.as_deref(), Some("out of scope"));
+        assert_eq!(r[0].hint.as_deref(), Some("likely-broken-access"));
+        let back = serde_json::to_value(&r[0]).unwrap();
+        assert_eq!(back["a"], serde_json::json!({"status": 200, "length": 900}));
+        assert_eq!(back["b"]["similarity"], serde_json::json!(0.97));
+        let st: AcStatus = serde_json::from_str(r#"{"a":{"names":["Cookie"],"markers":1,"set_at":"2026-11-18T10:00:00Z"},"b":null,"handle":"intigriti-x"}"#).unwrap();
+        assert_eq!(st.a.unwrap().names, vec!["Cookie"]);
+        assert!(st.b.is_none());
     }
 
     #[test]
