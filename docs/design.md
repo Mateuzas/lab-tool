@@ -1,6 +1,6 @@
 # Lab Tool UI design
 
-Living record of design decisions, so later passes stay consistent (and Matas can overrule them).
+Living record of design decisions, so later passes stay consistent (and the user can overrule them).
 
 ## Brief
 
@@ -91,7 +91,7 @@ Fixed in pass 1:
 Tools: `make app-shots` renders every state from the dev preview mock
 (`app/src/dev/preview-mock.ts`, `?s=<state>` in the browser) with Playwright.
 
-Open for Matas's pass: window chrome/title bar, the empty space below the controls (where the
+Open for the user's pass: window chrome/title bar, the empty space below the controls (where the
 terminal will go), an app icon, the VPN-file import flow (a file dialog instead of "put it in
 the vpn folder").
 
@@ -327,6 +327,9 @@ a launch screen ("work in progress").
 - Known limits: Bug bounty has no backend (its "running" is a UI flag); Burp stays open when the
   lab stops (it's the user's own project, we don't close it) but its proxy now points at nothing;
   the mode on screen isn't remembered across app restarts (always opens on Lab).
+- Superseded since (FE-2, slice 2b): Bug bounty opens straight on the Programs screen with a real
+  backend (no launch screen); the mode on screen is remembered and the default is Bug bounty; the
+  guard indicator in the header replaces the "running" flag.
 
 ## Pass 9 (2026-11-14): Bug bounty Programs screen
 
@@ -341,3 +344,15 @@ Notes from FE-2 (PR #10):
 - Colour by meaning only: violet = mode/selection/news, green = scope added/new program, red = scope removed/errors/no-auto flag.
 - Responsive: surface and scope columns hide below 1100 px; factors, access and handles below 640 px.
 - Every action has a key shown as a `kbd` next to its button and in the footer.
+
+Built after Pass 9 (same rules: a key for every action, shown as `kbd` and in the `?` overlay):
+- FE-4 guard header (`Guard · <program> · <rate> req/s · active` / `Guard off`), `u` with a
+  second-press confirm when switching, `b`, `g`, `R` refusals popover, active row marked.
+- FE-5 status line "Next sync HH:MM", recent alerts in the changes panel (`c`).
+- FE-7 `a` application tags in the join list, a compact Manual targets section, the `?` overlay.
+- FE-8 `t` / `h` as two compact buttons next to the guard indicator, disabled with a tooltip when
+  the guard is off or no program is active.
+- FE-6 look-here panel (`l`): hosts by interest, new ones highlighted, out-of-scope behind `x`,
+  `m` maps with progress; `Enter` shows the URL to paste into Burp instead of opening a browser.
+- Not built yet: access-control check screens (FE-9; CLI only for now). Key reference for users:
+  docs/USER-GUIDE.md.
