@@ -1,0 +1,26 @@
+id: kl-openapi
+info:
+  name: OpenAPI / Swagger definition
+  author: kali-lab
+  severity: info
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/openapi.json"
+      - "{{RootURL}}/swagger.json"
+      - "{{RootURL}}/v3/api-docs"
+      - "{{RootURL}}/v2/api-docs"
+      - "{{RootURL}}/swagger/v1/swagger.json"
+    max-size: 65536
+    redirects: false
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: regex
+        part: body
+        regex: ['"(openapi|swagger)"\s*:\s*"[23]']

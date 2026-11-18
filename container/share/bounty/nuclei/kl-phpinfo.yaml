@@ -1,0 +1,24 @@
+id: kl-phpinfo
+info:
+  name: phpinfo() page exposed
+  author: kali-lab
+  severity: low
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/phpinfo.php"
+      - "{{RootURL}}/info.php"
+    max-size: 65536
+    redirects: false
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["phpinfo()", "PHP Version"]
+        condition: and

@@ -1,0 +1,21 @@
+id: kl-server-status
+info:
+  name: Apache server-status exposed
+  author: kali-lab
+  severity: low
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/server-status"
+    max-size: 65536
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["Apache Server Status"]

@@ -5,13 +5,16 @@
                                         own hosts, so it runs automatically (after a sync, on `u`).
   recon map [--limit N]                 the guard's ACTIVE program only, on a key press: bounty-map in
                                         kali-bounty (httpx-toolkit + katana through the guard).
-  recon list <handle> [--json]          hosts + live + urls merged into one row per host, ranked.
+  recon exposures [--limit N]           the ACTIVE program only, on a key press: kali-lab's curated
+                                        nuclei checks on hosts a map found live, through the guard.
+  recon list <handle> [--json]          hosts + live + urls + exposures merged into one row per host.
 
 Files in work/<handle>/recon/ (CONTRACTS §10):
   hosts.jsonl   one line per name (passive; this module writes it)
   live.jsonl    httpx results per host (bounty-map writes it)
   urls.jsonl    katana URLs (bounty-map)
   mapped.json   {"hosts": {host: ts}}: hosts bounty-map probed, so "no answer" reads as not live
+  exposures.json {"checked": {host: ts}, "hits": [...]}: bounty-exposures (no bodies kept)
   state.json    {"baseline_at": first passive run}: hosts found by that first run are not "new"
 
 Names are classified with the guard's own matcher (guard_policy.py, imported by path), so the
@@ -56,9 +59,16 @@ SIGNALS = (
     ("debug", {"debug", "trace", "actuator", "phpinfo", "profiler", "test", "staging", "stage",
                "dev", "sandbox", "qa", "uat", "preprod"}, ("_profiler",)),
 )
+EXPOSURE_BONUS = 0.3     # a curated exposure hit outweighs any name signal (CONTRACTS §10.6)
 JS_FRAMEWORKS = ("react", "angular", "vue", "next.js", "nuxt", "svelte", "ember")
 JS_HEAVY_URLS = 20
 _TOKEN = re.compile(r"[a-z0-9]+")
+# "Sign in", "log-in", "sign_up" as two words also mean login (whole words: "design into" doesn't).
+LOGIN_PHRASE = re.compile(r"\b(sign|log)[\s_-]?(in|on|up)\b")
+# Public suffixes of two labels: their registrable domain is the last THREE labels.
+TWO_LEVEL = {"co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "co.nz",
+             "co.jp", "co.kr", "co.za", "co.in", "com.br", "com.mx", "com.tr", "com.cn", "com.sg",
+             "com.hk", "com.ar", "com.pl", "com.ua"}
 
 
 # -- shared ------------------------------------------------------------------------------------
@@ -282,7 +292,15 @@ def _tokens(text):
 
 def _registrable(host):
     parts = (host or "").lower().split(".")
-    return ".".join(parts[-2:])
+    n = 3 if ".".join(parts[-2:]) in TWO_LEVEL and len(parts) >= 3 else 2
+    return ".".join(parts[-n:])
+
+
+def _subdomain(host):
+    """The labels in front of the registrable domain: the only part of a name that can be a signal."""
+    reg = _registrable(host)
+    h = (host or "").lower()
+    return h[:-len(reg)].rstrip(".") if h.endswith(reg) else ""
 
 
 def signals_for(host, live, urls):
@@ -290,12 +308,12 @@ def signals_for(host, live, urls):
     paths = [urllib.parse.urlsplit(u.get("url") or "").path for u in urls]
     title = (live or {}).get("title") or ""
     tech = [str(t) for t in (live or {}).get("tech") or []]
-    sub = ".".join(host.split(".")[:-2])   # the program's own domain name is never a signal
+    sub = _subdomain(host)   # the program's own domain name is never a signal
     text = " ".join([sub, title, " ".join(tech)] + paths).lower()
     toks = _tokens(text)
     out = []
     for name, words, parts in SIGNALS:
-        if toks & words or any(p in text for p in parts):
+        if toks & words or any(p in text for p in parts) or (name == "login" and LOGIN_PHRASE.search(text)):
             out.append(name)
     js = sum(1 for p in paths if p.lower().endswith(".js"))
     if js >= JS_HEAVY_URLS or any(f in t.lower() for t in tech for f in JS_FRAMEWORKS):
@@ -307,8 +325,9 @@ def signals_for(host, live, urls):
     return out
 
 
-def interest(new, live, signals):
-    return round(min(1.0, (0.35 if new else 0) + (0.15 if live else 0) + 0.1 * len(signals)), 2)
+def interest(new, live, signals, exposed=False):
+    return round(min(1.0, (0.35 if new else 0) + (0.15 if live else 0) + 0.1 * len(signals)
+                     + (EXPOSURE_BONUS if exposed else 0)), 2)
 
 
 def _best_live(records):
@@ -331,6 +350,12 @@ def rows(ws, handle, now=None):
         if isinstance(r.get("host"), str):
             urls.setdefault(r["host"], []).append(r)
     mapped = (read_json(os.path.join(d, "mapped.json"), {}) or {}).get("hosts") or {}
+    exposures = {}
+    for h in (read_json(os.path.join(d, "exposures.json"), {}) or {}).get("hits") or []:
+        if isinstance(h, dict) and isinstance(h.get("host"), str) and h.get("check"):
+            exposures.setdefault(h["host"], [])
+            if h["check"] not in exposures[h["host"]]:
+                exposures[h["host"]].append(h["check"])
     state = read_json(os.path.join(d, "state.json"), {}) or {}
     now = now or utcnow()
     baseline = state.get("baseline_at")
@@ -356,6 +381,9 @@ def rows(ws, handle, now=None):
             is_live = None
         u = urls.get(host) or []
         sig = signals_for(host, best, u)
+        exp = sorted(exposures.get(host) or [])
+        if exp:
+            sig.append("exposed")
         out.append({
             "host": host,
             "scope": rec.get("scope") or classify(policy, host),
@@ -366,7 +394,8 @@ def rows(ws, handle, now=None):
             "tech": list(best.get("tech") or []) if best else [],
             "urls": len({(x.get("method") or "GET", x.get("url")) for x in u}),
             "signals": sig,
-            "interest": interest(new, is_live, sig),
+            "exposures": exp,
+            "interest": interest(new, is_live, [x for x in sig if x != "exposed"], bool(exp)),
             "first_seen": first,
         })
     # interest desc, then first_seen desc (unknown last), then host: stable sorts, last key first
@@ -396,9 +425,9 @@ def list_cmd(ws, handle, as_json=False, out=sys.stdout):
 
 # -- map ---------------------------------------------------------------------------------------
 
-def map_args(container, handle, limit=None):
+def map_args(container, handle, limit=None, script="bounty-map"):
     args = ["exec", "-e", "BOUNTY_HANDLE=" + handle, "-w", "%s/%s" % (shell.WORK, handle),
-            container, "bounty-run", "--actor", "human", "--", "bounty-map"]
+            container, "bounty-run", "--actor", "human", "--", script]
     if limit:
         args += ["--limit", str(int(limit))]
     return args
@@ -410,8 +439,9 @@ def automation_allowed(profile):
     return not (rules.get("automation") == "forbidden" or rps == 0)
 
 
-def map_cmd(ws, limit=None, run=subprocess.call):
-    """Active mapping of the guard's active program (CONTRACTS §10.2). Exit: bounty-map's own code;
+def map_cmd(ws, limit=None, run=subprocess.call, script="bounty-map"):
+    """Active mapping of the guard's active program (CONTRACTS §10.2), or with script
+    bounty-exposures the curated exposure checks (§10.6). Exit: the script's own code;
     3 guard not running; 5 no active program; 6 the program forbids automated tools."""
     cfg = guard._cfg()
     if not guard.running(cfg["container"]):
@@ -422,6 +452,10 @@ def map_cmd(ws, limit=None, run=subprocess.call):
     profile, _policy = load_profile(ws, handle)
     if not automation_allowed(profile):
         raise BountyError("automation-forbidden",
-                          "%s forbids automated tools: map it by hand in Burp" % handle, 6)
+                          "%s forbids automated tools: check it by hand in Burp" % handle, 6)
     guard._docker(shell.mkdir_args(cfg["container"], handle), check=True)
-    return run(["docker"] + map_args(cfg["container"], handle, limit))
+    return run(["docker"] + map_args(cfg["container"], handle, limit, script))
+
+
+def exposures_cmd(ws, limit=None, run=subprocess.call):
+    return map_cmd(ws, limit, run, script="bounty-exposures")

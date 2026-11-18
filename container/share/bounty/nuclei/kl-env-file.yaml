@@ -1,0 +1,25 @@
+id: kl-env-file
+info:
+  name: Exposed .env file
+  author: kali-lab
+  severity: high
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/.env"
+    max-size: 65536
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: regex
+        part: body
+        regex: ["(?m)^[A-Z][A-Z0-9_]{2,}="]
+      - type: word
+        part: header
+        words: ["text/html"]
+        negative: true

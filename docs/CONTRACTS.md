@@ -427,6 +427,23 @@ FE-6: on the Programs screen `l` opens the **look-here** panel for the selected 
 shows the URL and says "open in Burp's browser to test"; `m` maps the active program with progress).
 Hosts marked `new` are highlighted; out-of-scope ones are hidden behind a toggle.
 
+### 10.6 Curated exposure checks (BE-20)
+`host/bounty recon exposures [--limit N]`, app key **`e`** in the look-here panel: same rules as the
+map (guard's **active** program only, on a key press, exit 3/5/6 the same, refused up front when the
+profile forbids automation). `bounty-exposures` (container, hunter, through the guard as
+`tool:nuclei`, one host at a time at the program's rate) runs kali-lab's own nuclei templates
+(`container/share/bounty/nuclei/kl-*.yaml`, 13 checks: .git/config, .env, .DS_Store, .svn/wc.db,
+actuator/env, server-status, phpinfo, OpenAPI/Swagger definitions, GraphQL introspection,
+docker-compose, SQL dumps, .htpasswd, wp-config backups). Each is a few GETs from the site root, no
+redirects followed, ≤ 64 KB read, and matches only on status 200 **plus** specific content (and not
+an HTML page where a catch-all could fool it). Targets: hosts a map found live (`live.jsonl`),
+re-checked with the guard's matcher. No public template set is downloaded and no response body is
+kept: `recon/exposures.json` `{"checked": {host: ts}, "hits": [{"host","url","check","name","severity","ts"}]}`
+(a host's hits are replaced when it is checked again). Exit: 0; 1 no live hosts (map first); 130.
+In the list (§10.3) a host with hits gets `"exposures": [check ids]`, the signal `exposed` and
+**+0.3** interest (the `exposed` signal itself doesn't add the usual 0.1). Every hit is a lead to
+confirm by hand before reporting.
+
 ### 10.5 Change kind `program-closed`
 `programs changes` adds `program-closed` when `status` goes from open to suspended/closed (and
 `program-reopened` back). Notify (§9.2) when it's the guard's active or a followed program:

@@ -191,7 +191,29 @@ class List(Base):
         self.assertEqual(order[0], "api.acme.test")
         self.assertLess(order.index("new.acme.test"), order.index("silent.acme.test"))
         self.assertEqual(set(api), {"host", "scope", "new", "live", "status", "title", "tech", "urls",
-                                    "signals", "interest"})
+                                    "signals", "exposures", "interest"})
+
+    def test_exposures_score_and_show(self):
+        self.put("hosts.jsonl", [{"host": "old.acme.test", "scope": "in-scope", "first_seen": "2026-11-01T00:00:00Z"}])
+        self.put("live.jsonl", [{"host": "old.acme.test", "url": "https://old.acme.test", "status": 200}])
+        self.put("exposures.json", {"checked": {"old.acme.test": "x"}, "hits": [
+            {"host": "old.acme.test", "check": "kl-git-config"}, {"host": "old.acme.test", "check": "kl-env-file"},
+            {"host": "old.acme.test", "check": "kl-env-file"}]})
+        r = recon.rows(self.ws, "test-acme", now=self.NOW)[0]
+        self.assertEqual(r["exposures"], ["kl-env-file", "kl-git-config"])
+        self.assertIn("exposed", r["signals"])
+        self.assertEqual(r["interest"], 0.45)        # live 0.15 + exposure 0.30 ("exposed" isn't counted twice)
+
+    def test_signal_edge_cases(self):
+        self.assertIn("login", recon.signals_for("www.acme.test", {"title": "Dropbox Paper — Sign in"}, []))
+        self.assertIn("login", recon.signals_for("www.acme.test", {"title": "Log in to Acme"}, []))
+        self.assertNotIn("login", recon.signals_for("www.acme.test", {"title": "Our design into practice"}, []))
+        # a two-level public suffix: the company label isn't a subdomain word
+        self.assertNotIn("debug", recon.signals_for("app.staging.co.uk", None, []))
+        self.assertIn("debug", recon.signals_for("staging.acme.co.uk", None, []))
+        self.assertEqual(recon._registrable("a.b.acme.co.uk"), "acme.co.uk")
+        self.assertIn("redirect-offsite", recon.signals_for("a.acme.co.uk", {"location": "https://evil.co.uk/"}, []))
+        self.assertNotIn("redirect-offsite", recon.signals_for("a.acme.co.uk", {"location": "https://b.acme.co.uk/"}, []))
 
     def test_first_run_is_not_new(self):
         self.passive()
@@ -240,6 +262,20 @@ class Map(Base):
         self.write_profile(profile(rps=0, automation="forbidden"))
         with self.assertRaises(BountyError) as cm:
             self._map()
+        self.assertEqual(cm.exception.exit_code, 6)
+
+    def test_exposures_same_gates_other_script(self):
+        ran = []
+        with mock.patch.object(recon.guard, "running", return_value=True), \
+                mock.patch.object(recon.shell, "active_program", return_value="test-acme"), \
+                mock.patch.object(recon.guard, "_docker", return_value=(0, "", "")):
+            recon.exposures_cmd(self.ws, 3, run=lambda a: ran.append(a) or 0)
+        self.assertEqual(ran[0][-3:], ["bounty-exposures", "--limit", "3"])
+        self.write_profile(profile(rps=0, automation="forbidden"))
+        with self.assertRaises(BountyError) as cm:
+            with mock.patch.object(recon.guard, "running", return_value=True), \
+                    mock.patch.object(recon.shell, "active_program", return_value="test-acme"):
+                recon.exposures_cmd(self.ws, run=lambda a: self.fail("must not run"))
         self.assertEqual(cm.exception.exit_code, 6)
 
     def test_runs_only_the_active_program(self):

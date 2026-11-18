@@ -1,0 +1,25 @@
+id: kl-git-config
+info:
+  name: Exposed .git/config
+  author: kali-lab
+  severity: medium
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/.git/config"
+    max-size: 65536
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["[core]"]
+      - type: word
+        part: header
+        words: ["text/html"]
+        negative: true

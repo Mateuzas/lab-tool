@@ -1,0 +1,21 @@
+id: kl-graphql-introspection
+info:
+  name: GraphQL introspection enabled
+  author: kali-lab
+  severity: low
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/graphql?query=%7B__schema%7BqueryType%7Bname%7D%7D%7D"
+    max-size: 65536
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ['"queryType"']

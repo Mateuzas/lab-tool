@@ -128,6 +128,9 @@ pub struct ReconRow {
     pub urls: u32,
     #[serde(default)]
     pub signals: Vec<String>,
+    /// Curated exposure checks that matched (CONTRACTS §10.6): ids only, never contents.
+    #[serde(default)]
+    pub exposures: Vec<String>,
     pub interest: f64,
 }
 
@@ -318,10 +321,11 @@ pub fn recon_list(handle: &str) -> Result<Vec<ReconRow>, String> {
     run_json(&repo, &["recon", "list", handle, "--json"], &[0]).map_err(err_text)
 }
 
-/// `recon map` for the guard's active program, progress streamed (CONTRACTS §10.2).
-fn recon_map_blocking(on_progress: &dyn Fn(SyncEvent)) -> Result<(), (String, String)> {
+/// `recon map` (CONTRACTS §10.2) or `recon exposures` (§10.6) for the guard's active program,
+/// progress streamed.
+fn recon_map_blocking(sub: &str, on_progress: &dyn Fn(SyncEvent)) -> Result<(), (String, String)> {
     let repo = repo_dir().map_err(|m| ("failed".to_string(), m))?;
-    let mut child = cli(&repo, "host/bounty", &["recon", "map"])
+    let mut child = cli(&repo, "host/bounty", &["recon", sub])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -338,7 +342,7 @@ fn recon_map_blocking(on_progress: &dyn Fn(SyncEvent)) -> Result<(), (String, St
     }
     let status = child.wait().map_err(|e| ("failed".to_string(), e.to_string()))?;
     if !status.success() {
-        return Err(failure(&lines, "recon map", status));
+        return Err(failure(&lines, &format!("recon {sub}"), status));
     }
     Ok(())
 }
@@ -412,15 +416,24 @@ impl Bounty {
     /// `bounty_recon_map`: one at a time; exactly one `done` (no changes) or `error` on the channel;
     /// `bounty-recon-updated` for the active program afterwards (partial results count too).
     pub async fn recon_map(&self, app: AppHandle, on_event: Channel<SyncEvent>) -> Result<(), String> {
+        self.recon_job("map", app, on_event).await
+    }
+
+    /// `bounty_recon_exposures`: like `recon_map` (shares its one-at-a-time slot).
+    pub async fn recon_exposures(&self, app: AppHandle, on_event: Channel<SyncEvent>) -> Result<(), String> {
+        self.recon_job("exposures", app, on_event).await
+    }
+
+    async fn recon_job(&self, sub: &'static str, app: AppHandle, on_event: Channel<SyncEvent>) -> Result<(), String> {
         if self.mapping.swap(true, Ordering::SeqCst) {
-            return Err("a map is already running".into());
+            return Err("a map or exposure check is already running".into());
         }
         let _guard = RefreshGuard(&self.mapping);
         let handle = tauri::async_runtime::spawn_blocking(|| guard_status().ok().and_then(|g| g.program))
             .await
             .map_err(|e| e.to_string())?;
         let ch = on_event.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || recon_map_blocking(&|ev| { let _ = ch.send(ev); }))
+        let result = tauri::async_runtime::spawn_blocking(move || recon_map_blocking(sub, &|ev| { let _ = ch.send(ev); }))
             .await
             .map_err(|e| e.to_string())?;
         if let Some(h) = handle {
