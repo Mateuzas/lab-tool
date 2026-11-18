@@ -44,7 +44,7 @@ shell, the Claude copilot, recon mapping and the access-control check all go thr
 |---|---|
 | Programs sync at app start, then every 20 min ± 2 (only while the app runs) | `r` refresh now |
 | macOS notifications, at most 3 per sync (see below) | `u` load a program into the guard |
-| Passive recon (crt.sh + DNS from the Mac, no traffic to the program): after a sync for new in-scope wildcards on the active, followed or top-25 programs (≤ 3 per sync), and the first time you `u` a program | `m` / `recon map`: active mapping, active program only, through the guard |
+| Passive recon (crt.sh + DNS from the Mac, no traffic to the program): after a sync for new in-scope wildcards on the active, followed or top-25 programs (≤ 3 per sync), and the first time you `u` a program | `m` / `recon map`: active mapping, and `e` / `recon exposures`: curated exposure checks; active program only, through the guard |
 | Guard reload when a sync changes the active program's scope, rules or rate | `ac replay`: only the requests you name |
 | Guard status poll every 5 s while the screen is visible | `b`, `t`, `h`: Burp, shell, copilot |
 
@@ -89,10 +89,11 @@ followed or top-25 programs; bounty raised; rules changed or program suspended/c
 | `Enter` / `o` | show the host's URL (the app never opens it itself: paste it into Burp's browser, which goes through the guard) |
 | `y` | copy that URL |
 | `m` | map the active program, with progress; one map at a time |
+| `e` | check exposures on the hosts a map found live (kali-lab's 13 curated checks: `.git`, `.env`, SQL dumps, actuator, API definitions…), same rules as `m`; a hit shows a filled **exposed** chip (hover it for the checks) |
 | `x` | show / hide out-of-scope and not-in-scope hosts |
 | `l` / `Esc` | close |
 
-New hosts are highlighted. `m` explains why it can't run when the guard is off or another program
+New hosts are highlighted. `m` and `e` (one run at a time between them) explain why they can't run when the guard is off or another program
 is active.
 
 ## CLI reference
@@ -134,6 +135,7 @@ connect.
 |---|---|
 | `recon passive H [--domain D]` | crt.sh + one DNS lookup per name, from the Mac; nothing to the program. Exit 3 = crt.sh failed, partial results kept |
 | `recon map [--limit N]` | httpx-toolkit + katana on the active program's in-scope hosts, through the guard, at the program's rate. Exit 3 guard not running, 5 no active program, 6 the program forbids automation |
+| `recon exposures [--limit N]` | the 13 curated exposure checks on the active program's live hosts (map first), through the guard as `tool:nuclei`; no response bodies kept. Same exit codes as `recon map` |
 | `recon list H [--json]` | the look-here list |
 
 Files: `workspace/bounty/work/<h>/recon/` (`hosts.jsonl`, `live.jsonl`, `urls.jsonl`,
@@ -199,8 +201,12 @@ notified about. The copilot reminds you once if no `--auth-note` is recorded.
 first seen (newest first), then by name. The formula is in `bounty/recon.py`:
 
 ```
-interest = min(1.0,  0.35 if new  +  0.15 if live  +  0.1 × number of signals)
+interest = min(1.0,  0.35 if new  +  0.15 if live  +  0.1 × number of signals  +  0.3 if exposed)
 ```
+
+**`exposed`**: one or more of the curated exposure checks (`e`, `recon exposures`) matched on the
+host. It adds 0.3 once, however many checks hit; the `exposed` chip itself isn't counted as a 0.1
+signal too. A hit is a lead: open the URL in Burp's browser and confirm before reporting.
 
 **`new`**: the host's `first_seen` is within the last 7 days **and** later than
 `recon/state.json`'s `baseline_at`. The first passive run for a program sets the baseline, so
@@ -211,13 +217,14 @@ host is in `recon/mapped.json` but had no answer (or the guard refused it), `nul
 Only `true` scores.
 
 **Signals** are matched against one text made of: the host's **subdomain labels only** (everything
-except the last two labels, so `acme` in `acme.test` never counts), the page title and tech from
+in front of the registrable domain: the last two labels, or the last three for two-level public
+suffixes such as `co.uk` or `com.au`; so `acme` in `acme.test` or `acme.co.uk` never counts), the page title and tech from
 the map, and the paths of URLs katana found. The text is split into lowercase tokens
 (`[a-z0-9]+`); *words* must equal a whole token, *parts* match anywhere in the text.
 
 | Signal | Words (whole tokens) | Parts (anywhere) |
 |---|---|---|
-| `login` | login, signin, logon, auth, oauth, oauth2, sso, saml, signup, register, account, accounts, password, reset | `sign-in`, `log-in` |
+| `login` | login, signin, logon, auth, oauth, oauth2, sso, saml, signup, register, account, accounts, password, reset | `sign-in`, `log-in`, and "sign in", "log in", "sign up", "log on" as whole words (not inside "design into") |
 | `api` | api, apis, rest, rpc, jsonrpc, v1, v2, v3 | |
 | `admin` | admin, administrator, dashboard, manage, management, console, internal, staff, backoffice, cms, panel | |
 | `upload` | upload, uploads, import, attachment, attachments, files, media | |
@@ -225,10 +232,9 @@ the map, and the paths of URLs katana found. The text is split into lowercase to
 | `swagger` | swagger, openapi, redoc, apidocs | `api-docs`, `swagger-ui` |
 | `debug` | debug, trace, actuator, phpinfo, profiler, test, staging, stage, dev, sandbox, qa, uat, preprod | `_profiler` |
 | `js-heavy` | 20 or more found URLs ending in `.js`, or a tech name containing react, angular, vue, next.js, nuxt, svelte or ember | |
-| `redirect-offsite` | the map's redirect `location` (or final URL) points to a host whose last two labels differ from this host's | |
+| `redirect-offsite` | the map's redirect `location` (or final URL) points to a host with a different registrable domain | |
 
-Each signal counts once, however many words match. A title "Sign in" (with a space) does not match
-`login`: neither `sign-in` nor a login word is in it.
+Each signal counts once, however many words match.
 
 **Before a map**, a host has no title, tech, URLs or answer, so only `new` and signals from its own
 subdomain labels can score. Mapping is what lifts live, content-rich hosts up the list.
@@ -240,12 +246,13 @@ Worked examples:
 | `admin-api.staging.acme.test` | first seen 2 days ago, after the baseline; never mapped | labels `admin-api.staging` → tokens admin, api, staging → `admin`, `api`, `debug` | 0.35 + 0.3 = **0.65** |
 | `www.acme.test` | in the baseline; mapped: 200, title "Acme login", tech React + Nginx, URLs `/api/v2/users`, `/upload` | `login` (title), `api` (api, v2), `upload`, `js-heavy` (React); `www` and `acme` match nothing | 0.15 + 0.4 = **0.55** |
 | `status.acme.test` | in the baseline; mapped: 301 to `https://acme-status.example.net/` | `redirect-offsite` (example.net ≠ acme.test) | 0.15 + 0.1 = **0.25** |
+| `legacy.acme.test` | in the baseline; mapped: 200 "Index of /"; `e` found `.git/config` and `.env` | `exposed` (+0.3, once) | 0.15 + 0.3 = **0.45** |
 
 A new, live host with seven signals would reach 0.35 + 0.15 + 0.7 = 1.2 and is capped at 1.0. The
 score orders the list; it doesn't judge a host.
 
-Known limit: "last two labels" treats `shop.acme.co.uk` as subdomain `shop.acme`, so the
-company label can count as a signal word on such domains.
+Known limit: the list of two-level suffixes is short (`TWO_LEVEL` in `bounty/recon.py`: co.uk,
+com.au, co.jp …); a rarer one still counts its company label as a subdomain word.
 
 ## After Docker or the container restarts
 
@@ -281,7 +288,7 @@ metadata address, which is refused unless the profile lists it.
 threads) to the program's rate (`guard status`). A program with no stated rate gets 2 req/s.
 
 **`reason=automation-forbidden`.** The program's rate is 0: only your own Burp and shell traffic is
-allowed; tools, `recon map`, `ac replay` and Claude's active tools are refused.
+allowed; tools, `recon map`, `recon exposures`, `ac replay` and Claude's active tools are refused.
 
 **The guard refuses after `program use` with a template error.** The program's required header or
 User-Agent template has an unknown placeholder, or `INTIGRITI_USERNAME` is missing: run it through

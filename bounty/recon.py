@@ -63,6 +63,12 @@ EXPOSURE_BONUS = 0.3     # a curated exposure hit outweighs any name signal (CON
 JS_FRAMEWORKS = ("react", "angular", "vue", "next.js", "nuxt", "svelte", "ember")
 JS_HEAVY_URLS = 20
 _TOKEN = re.compile(r"[a-z0-9]+")
+# "Sign in", "log-in", "sign_up" as two words also mean login (whole words: "design into" doesn't).
+LOGIN_PHRASE = re.compile(r"\b(sign|log)[\s_-]?(in|on|up)\b")
+# Public suffixes of two labels: their registrable domain is the last THREE labels.
+TWO_LEVEL = {"co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "co.nz",
+             "co.jp", "co.kr", "co.za", "co.in", "com.br", "com.mx", "com.tr", "com.cn", "com.sg",
+             "com.hk", "com.ar", "com.pl", "com.ua"}
 
 
 # -- shared ------------------------------------------------------------------------------------
@@ -286,7 +292,15 @@ def _tokens(text):
 
 def _registrable(host):
     parts = (host or "").lower().split(".")
-    return ".".join(parts[-2:])
+    n = 3 if ".".join(parts[-2:]) in TWO_LEVEL and len(parts) >= 3 else 2
+    return ".".join(parts[-n:])
+
+
+def _subdomain(host):
+    """The labels in front of the registrable domain: the only part of a name that can be a signal."""
+    reg = _registrable(host)
+    h = (host or "").lower()
+    return h[:-len(reg)].rstrip(".") if h.endswith(reg) else ""
 
 
 def signals_for(host, live, urls):
@@ -294,12 +308,12 @@ def signals_for(host, live, urls):
     paths = [urllib.parse.urlsplit(u.get("url") or "").path for u in urls]
     title = (live or {}).get("title") or ""
     tech = [str(t) for t in (live or {}).get("tech") or []]
-    sub = ".".join(host.split(".")[:-2])   # the program's own domain name is never a signal
+    sub = _subdomain(host)   # the program's own domain name is never a signal
     text = " ".join([sub, title, " ".join(tech)] + paths).lower()
     toks = _tokens(text)
     out = []
     for name, words, parts in SIGNALS:
-        if toks & words or any(p in text for p in parts):
+        if toks & words or any(p in text for p in parts) or (name == "login" and LOGIN_PHRASE.search(text)):
             out.append(name)
     js = sum(1 for p in paths if p.lower().endswith(".js"))
     if js >= JS_HEAVY_URLS or any(f in t.lower() for t in tech for f in JS_FRAMEWORKS):

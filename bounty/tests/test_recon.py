@@ -204,6 +204,17 @@ class List(Base):
         self.assertIn("exposed", r["signals"])
         self.assertEqual(r["interest"], 0.45)        # live 0.15 + exposure 0.30 ("exposed" isn't counted twice)
 
+    def test_signal_edge_cases(self):
+        self.assertIn("login", recon.signals_for("www.acme.test", {"title": "Dropbox Paper — Sign in"}, []))
+        self.assertIn("login", recon.signals_for("www.acme.test", {"title": "Log in to Acme"}, []))
+        self.assertNotIn("login", recon.signals_for("www.acme.test", {"title": "Our design into practice"}, []))
+        # a two-level public suffix: the company label isn't a subdomain word
+        self.assertNotIn("debug", recon.signals_for("app.staging.co.uk", None, []))
+        self.assertIn("debug", recon.signals_for("staging.acme.co.uk", None, []))
+        self.assertEqual(recon._registrable("a.b.acme.co.uk"), "acme.co.uk")
+        self.assertIn("redirect-offsite", recon.signals_for("a.acme.co.uk", {"location": "https://evil.co.uk/"}, []))
+        self.assertNotIn("redirect-offsite", recon.signals_for("a.acme.co.uk", {"location": "https://b.acme.co.uk/"}, []))
+
     def test_first_run_is_not_new(self):
         self.passive()
         rows = recon.rows(self.ws, "test-acme")
