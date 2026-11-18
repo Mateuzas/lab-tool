@@ -1,0 +1,278 @@
+#!/usr/bin/python3 -I
+"""bounty-map [--limit N]   (CONTRACTS §10.2; started by `host/bounty recon map` through
+`bounty-run --actor human`, so it runs as hunter in /bounty/work/<handle>)
+
+Maps the guard's active program: for each in-scope host, httpx-toolkit (status, title, tech,
+length, redirect), then katana (depth 2, JS parsing, same host only, at most 300 URLs) on the
+live ones. One host at a time, both tools at the program's rate, every request through the guard
+(port 8080, labelled tool:httpx-toolkit / tool:katana with X-Bounty-Actor), so the guard still
+checks scope, rate and identification and logs each request.
+
+Targets: the program's in-scope `domain` / `url` entries, then the in-scope hosts that resolved in
+recon/hosts.jsonl (`recon passive`). Each one is checked with the guard's own matcher first.
+
+Writes recon/live.jsonl (one record per probed URL, replacing the host's older ones),
+recon/urls.jsonl (merged) and recon/mapped.json. Progress on stderr:
+`bounty: progress: <done>/<total> <host>`.
+Exit: 0 done (also when some hosts didn't answer); 6 the guard refused the tools
+(automation-forbidden); 64 usage; 1 nothing to map.
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+
+SHARE = os.environ.get("BOUNTY_SHARE", "/usr/local/share/bounty")
+sys.path.insert(0, SHARE)
+import guard_policy as gp  # noqa: E402
+
+PROXY = "http://127.0.0.1:8080"
+PROGRAMS = "/bounty/programs"
+WORK = "/bounty/work"
+DEPTH = 2
+MAX_URLS = 300
+CRAWL_TIME = "5m"
+HTTPX_TIMEOUT = 120
+_children = []
+
+
+def log(line):
+    sys.stderr.write("bounty: " + line + "\n")
+    sys.stderr.flush()
+
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def read_jsonl(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    v = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(v, dict):
+                    out.append(v)
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def write_atomic(path, text):
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(path))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def write_jsonl(path, records):
+    write_atomic(path, "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in records))
+
+
+def targets(profile, policy, hosts):
+    """[(host, start_url or None)], scope entries first, each in scope for the guard."""
+    seen, out = set(), []
+
+    def add(host, start=None):
+        host = gp.norm_host(host or "")
+        if not host or host in seen or "*" in host:
+            return
+        reason, category = policy.host_decision(host)
+        if reason is None and category == "target":
+            seen.add(host)
+            out.append((host, start))
+
+    for e in (profile.get("scope") or {}).get("in") or []:
+        t, v = e.get("type"), (e.get("value") or "").strip()
+        if t == "domain":
+            add(v)
+        elif t == "url":
+            u = v if "://" in v else "https://" + v
+            add(urllib.parse.urlsplit(u).hostname, u)
+    for r in hosts:
+        if r.get("scope") == "in-scope" and r.get("resolves"):
+            add(r.get("host"))
+    return out
+
+
+def rate(profile):
+    rps = (profile.get("rules") or {}).get("rate_limit_rps")
+    if rps is None:
+        return 2
+    return max(1, int(rps))
+
+
+def refusal(rec):
+    """The guard's refusal reason if this httpx record is the guard's 403, else None."""
+    hdr = rec.get("header") or {}
+    for k, v in hdr.items():
+        if k.lower().replace("-", "_") == "x_bounty_guard":
+            v = v[0] if isinstance(v, list) and v else v
+            if isinstance(v, str) and v.startswith("refused"):
+                return v.split("reason=", 1)[-1].strip() if "reason=" in v else "refused"
+    return None
+
+
+def run_lines(cmd, limit=None, timeout=None):
+    """Run cmd, yield stdout lines; stop it after `limit` lines or `timeout` seconds."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    _children.append(p)
+    start, n = time.time(), 0
+    try:
+        for line in p.stdout:
+            yield line
+            n += 1
+            if (limit and n >= limit) or (timeout and time.time() - start > timeout):
+                break
+    finally:
+        if p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        _children.remove(p)
+
+
+def probe(host, rl):
+    """httpx on one host -> list of live records (status None + refused=<reason> for refusals)."""
+    cmd = ["httpx-toolkit", "-u", host, "-j", "-irh", "-sc", "-title", "-td", "-cl", "-location",
+           "-fhr", "-silent", "-nc", "-duc", "-rl", str(rl), "-t", "1", "-timeout", "10",
+           "-retries", "0", "-H", "X-Bounty-Actor: tool:httpx-toolkit", "-http-proxy", PROXY]
+    out = []
+    for line in run_lines(cmd, timeout=HTTPX_TIMEOUT):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        why = refusal(r)
+        rec = {"host": host, "url": r.get("url"), "ts": now(),
+               "status": None if why else r.get("status_code") or r.get("status-code"),
+               "title": None if why else (r.get("title") or None),
+               "tech": [] if why else list(r.get("tech") or []),
+               "length": None if why else r.get("content_length") or r.get("content-length"),
+               "final_url": None if why else (r.get("final_url") or r.get("url")),
+               "location": None if why else (r.get("location") or None)}
+        if why:
+            rec["refused"] = why
+        out.append(rec)
+    return out
+
+
+def crawl(host, start, rl):
+    """katana from `start`, same host only -> URL records (at most MAX_URLS)."""
+    cmd = ["katana", "-u", start, "-d", str(DEPTH), "-jc", "-fs", "fqdn", "-rl", str(rl), "-c", "2",
+           "-p", "1", "-j", "-or", "-ob", "-silent", "-nc", "-duc", "-timeout", "10", "-ct", CRAWL_TIME,
+           "-H", "X-Bounty-Actor: tool:katana", "-proxy", PROXY]
+    seen, out = set(), []
+    for line in run_lines(cmd, limit=MAX_URLS * 3):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        req = r.get("request") or {}
+        url, method = req.get("endpoint") or r.get("endpoint"), (req.get("method") or "GET").upper()
+        if not isinstance(url, str) or gp.norm_host(urllib.parse.urlsplit(url).hostname or "") != host:
+            continue
+        if (method, url) in seen:
+            continue
+        seen.add((method, url))
+        out.append({"host": host, "url": url, "method": method, "source": "katana", "ts": now()})
+        if len(out) >= MAX_URLS:
+            break
+    return out
+
+
+def stop(_sig, _frame):
+    for p in list(_children):
+        try:
+            p.terminate()
+        except OSError:
+            pass
+    raise KeyboardInterrupt
+
+
+def main(argv):
+    limit = None
+    if argv[:1] == ["--limit"] and len(argv) == 2 and argv[1].isdigit():
+        limit = int(argv[1])
+    elif argv:
+        sys.stderr.write("usage: bounty-map [--limit N]\n")
+        return 64
+    handle = os.environ.get("BOUNTY_HANDLE") or ""
+    if not gp.HANDLE_RE.match(handle):
+        sys.stderr.write("bounty: usage: BOUNTY_HANDLE is not set (run it through host/bounty recon map)\n")
+        return 64
+    try:
+        with open(os.path.join(PROGRAMS, handle, "program.json"), encoding="utf-8") as f:
+            profile = json.load(f)
+        policy = gp.Policy(profile, "check", None, handle)
+    except (OSError, ValueError, gp.PolicyError) as e:
+        log("profile: %s: %s" % (handle, getattr(e, "message", e)))
+        return 1
+    d = os.path.join(WORK, handle, "recon")
+    os.makedirs(d, exist_ok=True)
+    todo = targets(profile, policy, read_jsonl(os.path.join(d, "hosts.jsonl")))
+    if limit:
+        todo = todo[:limit]
+    if not todo:
+        log("nothing: no in-scope hosts to map (run recon passive first for wildcard programs)")
+        return 1
+    rl = rate(profile)
+    signal.signal(signal.SIGTERM, stop)
+
+    live_path, urls_path, mapped_path = (os.path.join(d, n) for n in ("live.jsonl", "urls.jsonl", "mapped.json"))
+    live = read_jsonl(live_path)
+    urls = read_jsonl(urls_path)
+    try:
+        with open(mapped_path, encoding="utf-8") as f:
+            mapped = json.load(f)
+    except (OSError, ValueError):
+        mapped = {}
+    mapped.setdefault("hosts", {})
+
+    def save():
+        write_jsonl(live_path, live)
+        write_jsonl(urls_path, urls)
+        write_atomic(mapped_path, json.dumps(mapped, indent=1, sort_keys=True) + "\n")
+
+    n_live = n_urls = 0
+    try:
+        for i, (host, start) in enumerate(todo):
+            log("progress: %d/%d %s" % (i, len(todo), host))
+            recs = probe(host, rl)
+            if any(r.get("refused") == "automation-forbidden" for r in recs):
+                log("automation-forbidden: the guard refuses automated tools for %s" % handle)
+                save()
+                return 6
+            live[:] = [r for r in live if r.get("host") != host] + recs
+            mapped["hosts"][host] = now()
+            ok = [r for r in recs if r.get("status") is not None]
+            if ok:
+                n_live += 1
+                begin = start or ok[0].get("final_url") or ok[0].get("url")
+                found = crawl(host, begin, rl) if begin else []
+                have = {(u.get("method"), u.get("url")) for u in urls}
+                new = [u for u in found if (u["method"], u["url"]) not in have]
+                urls.extend(new)
+                n_urls += len(new)
+            save()
+        log("progress: %d/%d done" % (len(todo), len(todo)))
+    except KeyboardInterrupt:
+        save()
+        log("interrupted: partial results kept")
+        return 130
+    print("%s: mapped %d hosts, %d live, %d new URLs" % (handle, len(todo), n_live, n_urls))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
