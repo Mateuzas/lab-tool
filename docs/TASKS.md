@@ -14,16 +14,26 @@ next slice (ADR 003).
 | Architect docs for Bug bounty (this file, ARCHITECTURE, CONTRACTS, ADR 001–009) | #2 |
 | SOPS/age secrets, secret scan in CI (OPS-1); age key rotated after exposure | #3, #4 |
 | Repo moved off the iCloud Desktop to `~/Developer/kali-lab`: `make lint` and gitleaks work in place (OPS-2) | – |
-| Intigriti token stored (USER-1); API explored, field report `docs/research/intigriti-api.md` (BE-1); CONTRACTS §2–§4 final (ARC-2) | this PR |
+| Intigriti token stored (USER-1); API explored, field report `docs/research/intigriti-api.md` (BE-1); CONTRACTS §2–§4 final (ARC-2) | #5 |
+| Slice 1: programs sync, rank, changes (BE-2, BE-3, BE-4) | #6, #7 |
+| Slice 1b: incremental sync, Programs screen (BE-12, BE-13, FE-2) | #8–#11 |
+| Slice 2: image, scope guard, `program use`, Burp through the guard, guard UI (OPS-4, BE-5, BE-6, BE-16, FE-4) | #12–#20 |
+| Background sync, notifications, alerts UI (BE-17, FE-5) | #21–#24 |
+| Manual targets (BE-22, ADR 010) | #27 |
+| Slice 3: application state, sync hygiene, manual targets in the app, `?` overlay (BE-21b, BE-14b, BE-23, FE-7, OPS-5) | #28–#32 |
+| Work surface: `hunter/` copilot, `t` / `h` keys, `host/bounty shell` (BE-7, FE-8, BE-24) | #33–#36 |
+| `kali-bounty` hardening: cap-drop ALL, no-new-privileges, read-only root (ADR 011) | #37 |
+| Recon: passive, on-key map, look-here list and panel (BE-18, FE-6, ADR 012) | #25, #38, #26 |
+| Two-account access-control check, CLI (BE-19, ADR 013) | #39 |
 
 ## Slice 0: secrets and API access
 
 | Id | Owner | Task | Depends | Status | Done when |
 |---|---|---|---|---|---|
-| OPS-1 | DevOps | SOPS/age setup (ADR 006): dedicated kali-lab age key appended to `~/.config/sops/age/keys.txt`, `.sops.yaml` (rules for `secrets/` and `workspace/secrets/`), `scripts/secrets.sh` (edit, exec, rekey, check), `scripts/check-secrets.sh`, gitleaks workflow, `.gitignore` for `*.dec.*` and keys, `docs`-ready text for SECRETS (report it; Architect writes `docs/SECRETS.md`) | – | done | `scripts/secrets.sh edit intigriti` creates `workspace/secrets/intigriti.enc.yaml`; `scripts/secrets.sh check` and gitleaks pass in CI; no plaintext anywhere |
+| OPS-1 | DevOps | SOPS/age setup (ADR 006): dedicated kali-lab age key appended to `~/.config/sops/age/keys.txt`, `.sops.yaml` (rules for `secrets/` and `workspace/secrets/`), `scripts/secrets.sh` (edit, exec, rekey, check), `scripts/check-secrets.sh`, gitleaks workflow, `.gitignore` for `*.dec.*` and keys, `docs`-ready text for SECRETS (report it; Architect writes `docs/SECRETS.md`) | – | done (#3, #4) | `scripts/secrets.sh edit intigriti` creates `workspace/secrets/intigriti.enc.yaml`; `scripts/secrets.sh check` and gitleaks pass in CI; no plaintext anywhere |
 | USER-1 | User | Log in to Intigriti, create a personal access token, store it with `scripts/secrets.sh edit intigriti` (`INTIGRITI_TOKEN`, `INTIGRITI_USERNAME`). Never paste it in chat | OPS-1 | done | file exists and decrypts |
 | OPS-2 | DevOps | `make lint` works on this Mac (iCloud Desktop + Docker file sharing gives `resource busy`): lint a temporary copy, or move the clone off the Desktop | – | done | `make lint` passes in place |
-| BE-1 | Backender | **Intigriti API discovery**: `bounty/intigriti.py` minimal client (token from env), fetch the program list and 3 programs' details, domains and rules into `workspace/bounty/programs/<h>/raw/`; write a field report (which fields exist for each CONTRACTS §2/§4 input, real paths, pagination, rate limits). No normaliser yet | USER-1 | done | raw files on disk; report back; Architect updates CONTRACTS §2, §4 |
+| BE-1 | Backender | **Intigriti API discovery**: `bounty/intigriti.py` minimal client (token from env), fetch the program list and 3 programs' details, domains and rules into `workspace/bounty/programs/<h>/raw/`; write a field report (which fields exist for each CONTRACTS §2/§4 input, real paths, pagination, rate limits). No normaliser yet | USER-1 | done (#5) | raw files on disk; report back; Architect updates CONTRACTS §2, §4 |
 
 ## Slice 1: program intake and ranking (Mac only, no target traffic)
 
@@ -32,7 +42,7 @@ next slice (ADR 003).
 | BE-2 | Backender | `host/bounty programs sync` + normaliser to `program.json` (CONTRACTS §2, §6), activities, sync index, exit codes | BE-1, ARC-2 | done (#6) | unit tests on recorded raw responses (fixtures scrubbed of tokens); a real sync of all visible programs |
 | BE-3 | Backender | `programs rank` with factor scores, hard filters, `--explain`, `--json`, default `config/ranking.json` (CONTRACTS §4) | BE-2 | done (#6) | unit tests per factor and for missing inputs; top 20 printed for review |
 | BE-4 | Backender | `programs changes` + `history.jsonl` (new programs, scope added/removed, bounty and rules changed) | BE-2 | done (#6) | tests with two synthetic syncs |
-| ARC-2 | Architect | Finalise CONTRACTS §2/§4 from the BE-1 report | BE-1 | done | – |
+| ARC-2 | Architect | Finalise CONTRACTS §2/§4 from the BE-1 report | BE-1 | done (#5) | – |
 | ARC-3 | Architect + user | Review the ranking together, adjust weights, **pick the first program**, read its full rules | BE-3 | done: **Dropbox** (`intigriti-dropbox`) | `program use` target chosen; rules read by the user |
 
 ## Slice 1b: Programs screen in the app (user request 2026-11-14)
@@ -47,9 +57,9 @@ Follow-ups from slice 1b:
 
 | Id | Owner | Task | Status |
 |---|---|---|---|
-| BE-14 | Backender | Write a program's snapshot/raw only when it changed (each sync writes ~470 files now); re-check `needs-join` programs daily instead of weekly, so a newly joined program shows its scope the next day | done |
-| FE-3 | Frontender | `?` shortcut overlay; industry in the filter once `RankedProgram` carries it (CONTRACTS §9 change, Architect) | done |
-| OPS-5 | DevOps | Install the built app: `make app-install` copies `Lab Tool.app` to /Applications | done |
+| BE-14 | Backender | Write a program's snapshot/raw only when it changed (each sync writes ~470 files now); re-check `needs-join` programs daily instead of weekly, so a newly joined program shows its scope the next day | done (#31, as BE-14b) |
+| FE-3 | Frontender | `?` shortcut overlay; industry in the filter once `RankedProgram` carries it (CONTRACTS §9 change, Architect) | done (#30) |
+| OPS-5 | DevOps | Install the built app: `make app-install` copies `Lab Tool.app` to /Applications | done (#29) |
 
 ## Slice 2: scope guard (before any request to a target)
 
@@ -60,7 +70,7 @@ Follow-ups from slice 1b:
 | BE-6 | Backender | `program use` wires the active profile and the header value; Burp launch with upstream proxy `127.0.0.1:8081` | BE-5 | done (#14, #17; verified on www.dropbox.com) | Burp request to an in-scope test host shows in the flow log; out-of-scope gets the 403 |
 | BE-16 | Backender | Tauri commands of CONTRACTS §9.1; `start_lab` stops the guard | BE-6 | done (#19) | Rust tests (handle validation, status parsing); works from the built app |
 | FE-4 | Frontender | Guard controls on the Programs screen (CONTRACTS §9.1: `u`, `b`, `g`, header status, active row) | – (mock) | done (#20) | type-check, build, ui-shots of guard off/active/error |
-| BE-7 | Backender | `hunter/` Claude Code project: CLAUDE.md draft for the Architect, settings (read the program folder, Burp MCP read-only, `bounty-run --actor claude` only, approval per command) | BE-5 | done | Claude can read a profile and run an approved in-scope `curl`, labelled `claude` in the log; an unapproved command doesn't run |
+| BE-7 | Backender | `hunter/` Claude Code project: CLAUDE.md draft for the Architect, settings (read the program folder, Burp MCP read-only, `bounty-run --actor claude` only, approval per command) | BE-5 | done (#33) | Claude can read a profile and run an approved in-scope `curl`, labelled `claude` in the log; an unapproved command doesn't run |
 | USER-3 | User | Dropbox prep: find your `@intigriti.me` alias in your Intigriti profile; create two free Dropbox test accounts with it (e.g. `you+a@intigriti.me`, `you+b@intigriti.me`, so you can test one account against the other) | – | todo | two test accounts exist |
 | USER-2 | User | **First hunting session** on the chosen program with the CLI + Burp; keep a friction list | BE-6 | doing | friction list → next slice |
 
@@ -74,31 +84,30 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 |---|---|---|---|
 | BE-17 | Backender | Background sync every 20 min + macOS notifications + `access-granted`/`access-lost` change kinds (CONTRACTS §9.2) | done (#24) |
 | FE-5 | Frontender | Status line "Next sync 14:20", reload on `bounty-synced`, recent alerts in the changes panel (CONTRACTS §9.2) | done (#23) |
-| BE-21 | Backender | Private programs: list of programs that need joining with their list-field rank, application state you mark by hand (applied / accepted / rejected), `access-granted` closes the loop | done |
-| BE-18 | Backender | Recon (CONTRACTS §10): automatic passive (crt.sh + DNS, guard matcher), on-key active map of the active program (httpx + katana via the guard), `recon list`, `program-closed` kind, Tauri commands | done |
-| FE-6 | Frontender | Look-here panel (`l`), map key (`m`) with progress, new-host highlight (CONTRACTS §10.4) | done |
-| BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | done |
+| BE-21 | Backender | Private programs: list of programs that need joining with their list-field rank, application state you mark by hand (applied / accepted / rejected), `access-granted` closes the loop | done (#31) |
+| BE-18 | Backender | Recon (CONTRACTS §10): automatic passive (crt.sh + DNS, guard matcher), on-key active map of the active program (httpx + katana via the guard), `recon list`, `program-closed` kind, Tauri commands | done (#38; `program-closed` in #31) |
+| FE-6 | Frontender | Look-here panel (`l`), map key (`m`) with progress, new-host highlight (CONTRACTS §10.4) | done (#26) |
+| BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always (CONTRACTS §13) | done (#39; CLI only, on demand) |
 | FE-9 | Frontender | Access-control check in the app: session status, candidates list (pick with space), replay with progress, results with CHECK rows first (CONTRACTS §13) | todo |
-| BE-7 | Architect | `hunter/` Claude copilot (CONTRACTS §12.2) | done |
-| BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | done |
-| FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | done |
+| BE-7 | Architect | `hunter/` Claude copilot (CONTRACTS §12.2) | done (#33) |
+| BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | done (#35) |
+| FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | done (#34) |
 | BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
-
 | BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | done (#31) |
 | BE-14b | Backender | Sync hygiene: snapshots only on change, needs-join re-check daily (§11.2) | done (#31) |
 | BE-23 | Backender | Manual handles in the Tauri commands + `bounty_manual_list` + `program-closed`/`program-reopened` kinds (§10.5, §11.3) | done (#31) |
 | FE-7 | Frontender | `a` key application state in the join list, Manual targets section, `?` shortcut overlay (§11) | done (#30) |
 | OPS-5 | DevOps | `make app-install` copies the built app to /Applications; `.DS_Store` ignored | done (#29) |
-| BE-22 | Backender | Manual targets: `host/bounty manual add`, `legal_basis: authorization`, excluded from sync/rank/changes (CONTRACTS §2.1, ADR 010) | done |
+| BE-22 | Backender | Manual targets: `host/bounty manual add`, `legal_basis: authorization`, excluded from sync/rank/changes (CONTRACTS §2.1, ADR 010) | done (#27) |
 
 ## Later (in rough order, re-planned after each hunting session)
 
 | Id | Owner | Task |
 |---|---|---|
-| BE-8 | Backender | Recon pipeline per program (passive first), diff of new hosts between runs |
+| BE-8 | Backender | Recon pipeline per program (passive first), diff of new hosts between runs (largely covered by BE-18: passive recon, `new` hosts since the baseline) |
 | BE-9 | Backender | Findings: `finding new` from flow ids, report draft with AI-usage section, export for Intigriti |
 | BE-10 | Backender | Ranking feedback: hours and outcomes vs. rank report |
-| FE-1 | Frontender | Bug bounty screens, keyboard-first: Programs (ranked table), Program, Flows, Findings; `docs/design.md` Bug bounty section first (Architect) |
+| FE-1 | Frontender | Bug bounty screens, keyboard-first: Programs (ranked table, done in FE-2), Program, Flows, Findings; `docs/design.md` Bug bounty section first (Architect) |
 | OPS-3 | DevOps | `.ovpn` files in SOPS; Lab container decrypts into tmpfs at connect |
 | BE-11 | Backender | SOCKS path with IP scope for non-HTTP tools where a program allows it |
 | – | – | Other platforms; Lithuanian programs (ADR 008 `lt-article-25`); Analyze mode |
