@@ -209,6 +209,54 @@ if (new URLSearchParams(location.search).get("recon") === "1") {
     emit("bounty-recon-updated", { handle: "intigriti-dropbox" });
   }, 2000);
 }
+// ---- Access check (CONTRACTS §13): ?ac=set (default) | empty (no sessions, nothing yet) | running
+// (a replay stays mid-progress). Header values never reach the mock's state: only names are kept.
+const acMode = new URLSearchParams(location.search).get("ac") ?? "set";
+let acSessions: Record<string, { names: string[]; markers: number; set_at: string } | null> = acMode === "empty" ? { a: null, b: null } : {
+  a: { names: ["Cookie", "X-Csrf-Token"], markers: 1, set_at: iso(42) },
+  b: { names: ["Cookie", "X-Csrf-Token"], markers: 0, set_at: iso(38) },
+};
+const AC_CANDS = acMode === "empty" ? [] : [
+  { flow_id: "3f2a9c1e-77b0-4d1e-9a6f-0c2b8e5d4a10", ts: iso(6), method: "GET", url: "https://www.dropbox.com/2/users/get_current_account", status: 200, length: 1843, safe: true },
+  { flow_id: "8b1d02f4-3c55-4a8e-b0d2-61f7a9c3e215", ts: iso(9), method: "GET", url: "https://www.dropbox.com/2/files/list_folder?path=%2FTeam%20Docs&token=***", status: 200, length: 12764, safe: true },
+  { flow_id: "c47e9a10-5d2b-4f61-8e3a-9b0c1d2e3f40", ts: iso(11), method: "POST", url: "https://www.dropbox.com/2/sharing/add_folder_member", status: 200, length: 96, safe: false },
+  { flow_id: "0d9f8e7c-6b5a-4c3d-9e2f-1a0b9c8d7e6f", ts: iso(14), method: "GET", url: "https://paper.dropboxbusiness.com/api/docs/hx81Kd02/export?format=md", status: 200, length: 30412, safe: true },
+  { flow_id: "5e6f7a8b-9c0d-4e1f-a2b3-c4d5e6f7a8b9", ts: iso(20), method: "PATCH", url: "https://www.dropbox.com/2/account/set_profile_photo", status: 200, length: 211, safe: false },
+  { flow_id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", ts: iso(31), method: "GET", url: "https://www.dropbox.com/2/team/members/get_info_v2", status: 200, length: 4402, safe: true },
+  { flow_id: "f0e1d2c3-b4a5-4968-8776-5544332211aa", ts: iso(55), method: "OPTIONS", url: "https://api.dropboxapi.com/2/files/get_metadata", status: 204, length: 0, safe: true },
+];
+const v = (status: number | null, length: number, similarity: number, verdict: string, extra: Record<string, unknown> = {}) =>
+  ({ status, length, similarity, markers: 0, a_ids: 0, verdict, ...extra });
+let acResults = acMode === "empty" ? [] : [
+  { ts: iso(50), flow_id: "0d9f8e7c-6b5a-4c3d-9e2f-1a0b9c8d7e6f", method: "GET", url: "https://paper.dropboxbusiness.com/api/docs/hx81Kd02/export?format=md", a: { status: 200, length: 30412 },
+    b: v(200, 30388, 0.98, "leak", { markers: 1, a_ids: 3 }), none: v(401, 64, 0.02, "blocked"), hint: "likely-broken-access" },
+  { ts: iso(51), flow_id: "f0e1d2c3-b4a5-4968-8776-5544332211aa", method: "GET", url: "https://www.dropbox.com/2/files/get_thumbnail_v2?resource=public_link", a: { status: 200, length: 8211 },
+    b: v(200, 8211, 1.0, "same-as-a"), none: v(200, 8211, 1.0, "same-as-a"), hint: "public" },
+  { ts: iso(52), flow_id: "3f2a9c1e-77b0-4d1e-9a6f-0c2b8e5d4a10", method: "GET", url: "https://www.dropbox.com/2/users/get_current_account", a: { status: 200, length: 1843 },
+    b: v(200, 1790, 0.41, "differs"), none: v(401, 64, 0.03, "blocked"), hint: "none" },
+  { ts: iso(53), flow_id: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d", method: "GET", url: "https://www.dropbox.com/2/team/members/get_info_v2", a: { status: 200, length: 4402 },
+    b: v(403, 120, 0.05, "blocked"), none: v(null, 0, 0, "refused", { refused: "rate limit (5 req/s)" }), hint: "none" },
+];
+async function acReplay(args: { ids: string[]; unsafeIds: string[]; onEvent: { id: number } }) {
+  const cb = callbacks.get(args.onEvent.id)!;
+  let index = 0;
+  const send = (message: unknown) => cb({ index: index++, message });
+  if (!acSessions.a || !acSessions.b) { send({ kind: "error", code: "usage", message: "no session for account B: run ac session b first" }); return null; }
+  const rows = AC_CANDS.filter((c) => args.ids.includes(c.flow_id));
+  const unsafe = rows.find((c) => !c.safe && !args.unsafeIds.includes(c.flow_id));
+  if (unsafe) { send({ kind: "error", code: "usage", message: `${unsafe.method} ${unsafe.url} changes data: pass --unsafe to replay it` }); return null; }
+  for (let i = 0; i < rows.length; i++) {
+    await sleep(250);
+    send({ kind: "progress", done: i, total: rows.length, text: `${rows[i].method} ${rows[i].url}` });
+    if (acMode === "running" && i === 1) return new Promise(() => {});
+  }
+  acResults = [...rows.map((c) => ({ ts: iso(0), flow_id: c.flow_id, method: c.method, url: c.url, a: { status: c.status, length: c.length },
+    b: v(403, 120, 0.05, "blocked"), none: v(401, 64, 0.02, "blocked"), hint: "none" })), ...acResults];
+  send({ kind: "progress", done: rows.length, total: rows.length, text: "done" });
+  emit("bounty-ac-updated", { handle: guard.program });
+  send({ kind: "done", changes: [] });
+  return null;
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let refreshing = false;
 
@@ -247,6 +295,21 @@ async function bountyRefresh(channel: { id: number }) {
       if (guard.status !== "active") throw "bounty: guard: no active program (exit 5)";
       return reconMap(args.onEvent as unknown as { id: number });
     }
+    if (cmd.startsWith("bounty_ac_") && !(guard.running && guard.program)) {
+      throw guard.running ? "Pick a program first." : "Start the guard first.";
+    }
+    if (cmd === "bounty_ac_status") { await sleep(40); return { handle: guard.program, ...acSessions }; }
+    if (cmd === "bounty_ac_candidates") { await sleep(80); return AC_CANDS; }
+    if (cmd === "bounty_ac_results") { await sleep(60); return acResults; }
+    if (cmd === "bounty_ac_set_session") {
+      const a = args as unknown as { who: string; headers: string; markers: string[] };
+      const names = [...a.headers.matchAll(/^([A-Za-z0-9-]+):/gm)].map((m) => m[1]);
+      if (!names.length) throw "no Name: value header line on stdin";
+      acSessions = { ...acSessions, [a.who]: { names, markers: a.markers.length, set_at: iso(0) } };
+      return null;
+    }
+    if (cmd === "bounty_ac_clear_session") { acSessions = { ...acSessions, [args.who]: null }; return null; }
+    if (cmd === "bounty_ac_replay") return acReplay(args as unknown as { ids: string[]; unsafeIds: string[]; onEvent: { id: number } });
     if (cmd === "bounty_guard_status") return guardStatus();
     if (cmd === "bounty_use") { await sleep(500); guard = gActive(args.handle); return guard; }
     if (cmd === "bounty_guard_stop") { await sleep(300); guard = G0; return null; }

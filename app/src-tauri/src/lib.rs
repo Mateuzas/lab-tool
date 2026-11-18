@@ -239,6 +239,41 @@ async fn bounty_open_hunter() -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(bounty::open_hunter).await.map_err(|e| e.to_string())?
 }
 
+/// Which access-check sessions are set for the active program: header names only (CONTRACTS §13.4).
+#[tauri::command]
+async fn bounty_ac_status() -> Result<bounty::AcStatus, String> {
+    tauri::async_runtime::spawn_blocking(bounty::ac_status).await.map_err(|e| e.to_string())?
+}
+
+/// Set account A's or B's session: `headers` go only to the CLI's stdin, never logged or returned.
+#[tauri::command]
+async fn bounty_ac_set_session(who: String, headers: String, markers: Vec<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::ac_set_session(&who, headers, &markers)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn bounty_ac_clear_session(who: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::ac_clear_session(&who)).await.map_err(|e| e.to_string())?
+}
+
+/// Requests made as account A that can be replayed (CONTRACTS §13.2).
+#[tauri::command]
+async fn bounty_ac_candidates(since_hours: f64) -> Result<Vec<bounty::AcCandidate>, String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::ac_candidates(since_hours)).await.map_err(|e| e.to_string())?
+}
+
+/// Replay the picked requests as B and with no session, through the guard. One at a time.
+#[tauri::command]
+async fn bounty_ac_replay(app: AppHandle, ids: Vec<String>, unsafe_ids: Vec<String>, on_event: Channel<bounty::SyncEvent>,
+                          state: State<'_, bounty::Bounty>) -> Result<(), String> {
+    state.ac_replay(app, ids, unsafe_ids, on_event).await
+}
+
+#[tauri::command]
+async fn bounty_ac_results() -> Result<Vec<bounty::AcResult>, String> {
+    tauri::async_runtime::spawn_blocking(bounty::ac_results).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -253,7 +288,9 @@ pub fn run() {
             bounty_ranking, bounty_refresh, open_program,
             bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state,
             bounty_set_application, bounty_manual_list, bounty_open_shell, bounty_open_hunter,
-            bounty_recon_list, bounty_recon_map
+            bounty_recon_list, bounty_recon_map,
+            bounty_ac_status, bounty_ac_set_session, bounty_ac_clear_session, bounty_ac_candidates,
+            bounty_ac_replay, bounty_ac_results
         ])
         .setup(|app| {
             bounty::spawn_timer(app.handle().clone());

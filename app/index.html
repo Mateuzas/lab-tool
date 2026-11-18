@@ -190,6 +190,7 @@
         </div>
         <button type="button" class="pg-toggle pg-work" id="pg-shell" aria-keyshortcuts="t" aria-disabled="true">Shell <kbd>t</kbd></button>
         <button type="button" class="pg-toggle pg-work" id="pg-hunter" aria-keyshortcuts="h" aria-disabled="true">Claude <kbd>h</kbd></button>
+        <button type="button" class="pg-toggle pg-work" id="pg-access" aria-keyshortcuts="v" aria-disabled="true">Access <kbd>v</kbd></button>
         <button type="button" class="pg-toggle" id="pg-burp" aria-keyshortcuts="b">Burp <kbd>b</kbd></button>
         <button type="button" class="pg-toggle" id="pg-guard-stop" aria-keyshortcuts="g">Stop guard <kbd>g</kbd></button>
         <button type="button" class="pg-refresh" id="pg-refresh" aria-keyshortcuts="r">Refresh <kbd>r</kbd></button>
@@ -257,11 +258,69 @@
         </footer>
       </section>
 
+      <section class="lh ac" id="ac" role="dialog" aria-labelledby="ac-title" hidden>
+        <header class="lh-head">
+          <h2 id="ac-title"></h2>
+          <div class="ac-sessions" role="group" aria-label="Test account sessions">
+            <button type="button" class="ac-chip" id="ac-a" aria-keyshortcuts="1"></button>
+            <button type="button" class="ac-chip" id="ac-b" aria-keyshortcuts="2"></button>
+          </div>
+          <button type="button" class="lh-close" id="ac-close" aria-label="Close access check">Close <kbd>Esc</kbd></button>
+        </header>
+        <div class="ac-bar">
+          <div class="ac-tabs" role="tablist" aria-label="Access check views">
+            <button type="button" role="tab" id="ac-tab-cand" aria-controls="ac-wrap" aria-selected="true" aria-keyshortcuts="Tab"></button>
+            <button type="button" role="tab" id="ac-tab-res" aria-controls="ac-wrap" aria-selected="false" aria-keyshortcuts="Tab"></button>
+          </div>
+          <p class="lh-sum" id="ac-sum" role="status"></p>
+          <button type="button" class="lh-map" id="ac-run" aria-keyshortcuts="Enter"></button>
+        </div>
+        <p class="lh-map-line" id="ac-line" role="status" hidden></p>
+        <div class="lh-table-wrap" id="ac-wrap" tabindex="-1">
+          <table class="lh-table ac-table" id="ac-cand" hidden>
+            <thead><tr><th class="ac-pick" scope="col"><span class="visually-hidden">Picked</span></th><th class="ac-method" scope="col">Method</th><th scope="col">URL</th><th class="num ac-status" scope="col">Status</th><th class="num ac-len" scope="col">Length</th><th class="num ac-ts" scope="col">Time</th></tr></thead>
+            <tbody id="ac-cand-body"></tbody>
+          </table>
+          <table class="lh-table ac-table" id="ac-res" hidden>
+            <thead><tr><th scope="col" class="ac-hint-cell"><span class="visually-hidden">Hint</span></th><th class="ac-method" scope="col">Method</th><th scope="col">URL</th><th scope="col" class="ac-a" title="A's recorded answer">A</th><th scope="col" class="ac-b" title="Replayed with B's session: status, verdict, similarity to A's body">B</th><th scope="col" class="ac-none" title="Replayed with no session">No session</th></tr></thead>
+            <tbody id="ac-res-body"></tbody>
+          </table>
+          <div class="pg-empty" id="ac-empty" hidden></div>
+        </div>
+        <p class="ac-note" id="ac-note" hidden>Confirm CHECK rows by hand in Burp before reporting.</p>
+        <footer class="lh-foot">
+          <span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>Space</kbd> pick</span><span><kbd>!</kbd> allow changes data</span>
+          <span><kbd>↵</kbd> replay</span><span><kbd>Tab</kbd> results</span><span><kbd>1</kbd><kbd>2</kbd> set A, B</span>
+          <span><kbd>c</kbd> clear</span><span><kbd>r</kbd> reload</span><span><kbd>Esc</kbd> close</span>
+        </footer>
+        <div class="ac-paste" id="ac-paste" hidden>
+          <form class="ac-paste-card" id="ac-paste-form" role="dialog" aria-modal="true" aria-labelledby="ac-paste-title" autocomplete="off">
+            <h3 id="ac-paste-title"></h3>
+            <p class="ac-paste-lead" id="ac-paste-lead"></p>
+            <label class="ac-field">
+              <span>Header lines (Cookie: …, Authorization: …)</span>
+              <textarea id="ac-headers" rows="6" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                placeholder="Cookie: session=…&#10;Authorization: Bearer …"></textarea>
+            </label>
+            <label class="ac-field" id="ac-marker-row">
+              <span>Marker: text only A's data contains, like A's email or user id (optional)</span>
+              <input id="ac-marker" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+            </label>
+            <p class="ac-paste-error" id="ac-paste-error" role="alert" hidden></p>
+            <p class="ac-paste-note">Kept in the guard container's memory only, until it restarts. Never written to disk or shown again.</p>
+            <div class="ac-paste-actions">
+              <button type="button" id="ac-cancel">Cancel <kbd>Esc</kbd></button>
+              <button type="submit" class="primary" id="ac-save">Save <kbd>⌘↵</kbd></button>
+            </div>
+          </form>
+        </div>
+      </section>
+
       <footer class="pg-foot">
         <p class="pg-keys" aria-label="Keyboard shortcuts">
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
-          <span><kbd>u</kbd> use program</span><span><kbd>l</kbd> look here</span><span><kbd>m</kbd> map</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
+          <span><kbd>u</kbd> use program</span><span><kbd>l</kbd> look here</span><span><kbd>m</kbd> map</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>v</kbd> access check</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
           <span><kbd>?</kbd> all keys</span>
         </p>
         <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
@@ -299,6 +358,7 @@
               <dt><kbd>m</kbd></dt><dd>Map the active program through the guard (httpx + katana)</dd>
               <dt><kbd>t</kbd></dt><dd>Terminal shell in the guard container</dd>
               <dt><kbd>h</kbd></dt><dd>Claude copilot for the active program</dd>
+              <dt><kbd>v</kbd></dt><dd>Access check: replay account A's requests as B and with no session</dd>
               <dt><kbd>b</kbd></dt><dd>Open Burp through the guard</dd>
               <dt><kbd>g</kbd></dt><dd>Stop the guard</dd>
               <dt><kbd>R</kbd></dt><dd>Requests the guard refused</dd>

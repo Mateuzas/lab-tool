@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { setupGuard } from "./guard";
 import { setupLookHere } from "./lookhere";
+import { setupAccess } from "./access";
 
 /**
  * Bug bounty's Programs screen (FE-2). Shows the cached ranking at once, refreshes in the
@@ -179,13 +180,20 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   const guard = setupGuard({
     visible: opts.visible,
     nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
-    onChange: () => { markActive(); look.redraw(); },
+    onChange: () => { markActive(); look.redraw(); access.redraw(); },
   });
   const look = setupLookHere({
     nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
     active: () => guard.active(),
     onClose: () => { wrap.focus({ preventScroll: true }); },
   });
+  const access = setupAccess({
+    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
+    active: () => guard.active(),
+    onClose: () => { wrap.focus({ preventScroll: true }); },
+  });
+  const openAccess = () => { if (guard.gate("the access check")) access.open(); };
+  $("pg-access").addEventListener("click", openAccess);
 
   // ---- Header (built once) ----
   const headRow = $("pg-head-row");
@@ -671,6 +679,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     if (!opts.visible() || e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target as HTMLElement;
     if (look.isOpen()) { if (look.key(e)) e.preventDefault(); return; }
+    if (access.isOpen()) { if (access.key(e)) e.preventDefault(); return; }
     if (t === filterBox) {
       if (e.key === "Escape") { e.preventDefault(); if (filterBox.value) { filterBox.value = ""; filter = ""; render(); } else filterBox.blur(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
@@ -702,6 +711,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "b": void guard.burp(); break;
       case "t": void guard.shell(); break;
       case "h": void guard.hunter(); break;
+      case "v": openAccess(); break;
       case "g": void guard.stop(); break;
       case "a": void cycleApplication(); break;
       case "?": toggleHelp(true); break;

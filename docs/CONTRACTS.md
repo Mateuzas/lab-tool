@@ -534,3 +534,33 @@ otherwise.
 Writes `work/<h>/ac/results.jsonl` (one line per replayed request:
 `{"ts","flow_id","method","url","a":{"status","length"},"b":{…},"none":{…},"hint"}`); **no bodies and
 no header values** are stored. `host/bounty ac results [--json]` prints them, flagged first.
+
+### 13.4 App (FE-9)
+| Command | Runs | Returns |
+|---|---|---|
+| `bounty_ac_status()` | `ac status --json` | `{handle, a: {names, markers, set_at}\|null, b: …\|null}` |
+| `bounty_ac_set_session(who, headers, markers)` | `ac session <who> [--marker m]…` with `headers` written to the CLI's **stdin** | `()` |
+| `bounty_ac_clear_session(who)` | `ac session <who> --clear` | `()` |
+| `bounty_ac_candidates(since_hours)` | `ac candidates --json --since H` | `AcCandidate[]` (§13.2 row) |
+| `bounty_ac_replay(ids, unsafe_ids, on_event: Channel<SyncEvent>)` | `ac replay <ids…> [--unsafe id]…`, progress streamed; one at a time | `()` after one `done` (no changes) / `error`; then emits `bounty-ac-updated {handle}` |
+| `bounty_ac_results()` | `ac results --json` | `AcResult[]` (§13.3 record) |
+
+Errors by exit code: 3 → "Start the guard first.", 5 → "Pick a program first.", 6 → "This program
+forbids automated tools: compare the accounts by hand in Burp.", 64 → the CLI's own message (last
+`bounty: usage: …` line), else the generic failure text (`failure()`).
+`who` must be exactly `a` or `b`; `ids` must match `^[0-9a-f-]{8,64}$`, validated in Rust before
+anything runs. Session header text crosses IPC once, goes only to the CLI's stdin, and is never
+logged, stored, echoed back or kept in UI state after sending.
+
+UI: on the Programs screen **`v`** opens the **Access check** panel for the guard's active program
+(disabled with a tooltip when the guard is off or no program is active; in the `?` overlay, the
+footer key strip and as a button next to Shell/Claude/Burp). Header "Access check: <program>" with
+two session chips (A / B: header names, marker count, set time, or "not set"). `1`/`2` open a paste
+dialog for A/B (header lines; one marker field for A only; Save/Cancel; the textarea is cleared on
+save or cancel); `c` clears a session after a confirm (`1`/`2` picks which when both are set;
+not Shift-`1`, which is `!` on most layouts). Candidates (last 24 h): `j/k`
+move, Space picks; a row whose method isn't safe shows "changes data" and needs `!` on it to be
+replayed (`--unsafe`); `Enter` replays the picked rows with a progress line. `Tab` switches to
+Results: CHECK (`likely-broken-access`) first, then `public`, then `none`, with "Confirm CHECK rows
+by hand in Burp before reporting." `r` reloads; `Esc` closes. The panel reloads on
+`bounty-ac-updated`.
