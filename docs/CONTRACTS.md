@@ -132,11 +132,11 @@ header. **All three must agree** (case-insensitive, trailing dot removed), other
    null → 2 req/s; 0 → only `--actor human` traffic (Burp, your terminal), tools and Claude refused
    with `automation-forbidden`
 7. otherwise allow, apply the program's identification, forward:
-   - `request_header` template → that header (e.g. `X-Intigriti-Username: mateuzas`), replacing any
+   - `request_header` template → that header (e.g. `X-Intigriti-Username: alice`), replacing any
      existing one;
    - `user_agent` template → the `User-Agent` becomes the template with the username filled in and
      the client's original User-Agent in the `<user agent>` slot (Dropbox:
-     `Intigriti - mateuzas - Mozilla/5.0 …`); a missing original becomes `kali-lab`.
+     `Intigriti - alice - Mozilla/5.0 …`); a missing original becomes `kali-lab`.
    Placeholders are matched case-insensitively in both spellings platforms use: `{Username}`,
    `<username>`, and `<user agent>` / `{UserAgent}`. A template with an unknown placeholder makes
    `program use` fail (exit 4) rather than send a malformed header.

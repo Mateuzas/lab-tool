@@ -26,10 +26,27 @@ Tokens can be re-issued, but that's the only way back.
 
 ```sh
 scripts/secrets.sh edit intigriti        # opens it decrypted in $EDITOR, re-encrypts on save
+scripts/secrets.sh edit --project <name> # the same for a committed project secret in secrets/
 scripts/secrets.sh list                  # names and keys, never values
 scripts/secrets.sh exec intigriti -- host/bounty programs sync   # values only in that process's env
-make secrets-check                       # what CI runs
+make secrets-check                       # what CI runs (also: scripts/secrets.sh check)
 ```
+
+`scripts/secrets.sh` works on the checkout it is run from (`git rev-parse --show-toplevel`), and
+`workspace/` exists only in the main clone (`~/Developer/kali-lab`), so run `edit`/`exec` there,
+not in a worktree. The app runs `scripts/secrets.sh exec intigriti -- …` itself for sync and
+`program use`, and sets `SOPS_AGE_KEY_FILE` to `~/.config/sops/age/keys.txt` when it is unset
+(a GUI app doesn't get `~/.zshrc`).
+
+Secrets in the Bug bounty flow:
+- `INTIGRITI_USERNAME` reaches the scope guard only through `docker exec -e` at `program use`
+  and is kept in the container's tmpfs (`/dev/shm`), never on disk; a container restart drops it.
+- Access-control check sessions (`host/bounty ac session`) are read from stdin, never argv, and
+  stored only in the container's tmpfs (root, 0600). `ac status` and results never show values.
+- The guard's flow log and `.mitm` files can contain session cookies and tokens from your test
+  accounts. Treat exported flows as sensitive; redact before putting excerpts in a report.
+- The Claude copilot (`hunter/`) is denied reads of `workspace/secrets/`, `workspace/vpn/` and
+  `~/.config/sops/`.
 
 A new file starts from `scripts/secret-templates/<name>.yaml` (placeholders only) when a template
 exists. Edit with an editor that doesn't write backup or swap files next to the file, or set
@@ -51,7 +68,8 @@ exists. Edit with an editor that doesn't write backup or swap files next to the 
 3. no key material or known token formats in tracked text (age keys, PEM private keys, inline
    OpenVPN keys, GitHub/AWS/Anthropic/Slack/Google tokens, a plaintext `INTIGRITI_TOKEN`);
 4. gitleaks over the whole history (default rules + `.github/gitleaks.toml`). It scans a temporary
-   clone, because on the iCloud-synced Desktop it hangs on the working tree.
+   clone, because in an iCloud-synced folder it hangs on the working tree (the repo used to live on
+   the Desktop; it is now in `~/Developer/kali-lab`).
 
 ## Adding a person or CI
 
