@@ -1,0 +1,21 @@
+id: kl-ds-store
+info:
+  name: Exposed .DS_Store
+  author: kali-lab
+  severity: low
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/.DS_Store"
+    max-size: 65536
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["Bud1"]

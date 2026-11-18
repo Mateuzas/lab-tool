@@ -17,6 +17,9 @@ CERT, KEY, LOG = sys.argv[1], sys.argv[2], sys.argv[3]
 lock = threading.Lock()
 
 
+EXPOSED = {"/.git/config": b"[core]\n\trepositoryformatversion = 0\n",
+           "/.env": b"APP_ENV=prod\nDB_PASSWORD=FAKE_GUARD_TEST_VALUE\n"}
+
 # Access-control endpoints for the BE-19 check (CONTRACTS §13): sid A = alice, sid B = bob.
 AC_A, AC_B = "a" * 20, "b" * 20
 ALICE = {"owner": "alice@acme.test", "account": "1000001", "doc": "alice's travel plans for spring"}
@@ -51,6 +54,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         status = 200
         if self.path == "/ip":
             body = b"198.51.100.20\n"
+            ctype = "text/plain"
+        elif self.path in EXPOSED:              # planted for the BE-20 exposure checks (CONTRACTS §10.6)
+            body = EXPOSED[self.path]
             ctype = "text/plain"
         elif self.path.startswith("/ac/"):
             status, body = ac_answer(self.command, self.path, self.headers.get("Cookie") or "")

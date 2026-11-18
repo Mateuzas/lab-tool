@@ -92,7 +92,7 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | BE-7 | Architect | `hunter/` Claude copilot (CONTRACTS §12.2) | done (#33) |
 | BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | done (#35) |
 | FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | done (#34) |
-| BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | later |
+| BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | done (#42) |
 | BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | done (#31) |
 | BE-14b | Backender | Sync hygiene: snapshots only on change, needs-join re-check daily (§11.2) | done (#31) |
 | BE-23 | Backender | Manual handles in the Tauri commands + `bounty_manual_list` + `program-closed`/`program-reopened` kinds (§10.5, §11.3) | done (#31) |

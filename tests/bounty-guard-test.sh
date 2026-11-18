@@ -480,6 +480,22 @@ expect "$n" 8 "replays in the flow log as tool:ac-check (B + none per request)"
 grep -rq "$SA" "$WS/work" && check bad "no session value written to the workspace" || check ok "no session value written to the workspace"
 as_root sh -c 'stat -c %a /dev/shm/bounty-ac/test-acme/a.json' | grep -q '^600$' && check ok "sessions in tmpfs, root 0600" || check bad "sessions in tmpfs, root 0600"
 
+echo "== (r) curated exposure checks on mapped live hosts (CONTRACTS §10.6)"
+use test-acme
+before=$(flows test-acme | wc -l)
+host/bounty recon exposures >"$WS/exp.out" 2>"$WS/exp.err"; rc=$?
+expect "$rc" 0 "recon exposures exits 0"
+grep -q "bounty: progress: 2/2 done" "$WS/exp.err" && check ok "recon exposures streams progress" || check bad "recon exposures streams progress ($(tail -2 "$WS/exp.err"))"
+got=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(sorted({h["check"] for h in d["hits"]}), sorted({h["host"] for h in d["hits"]}), sorted(d["checked"]))' "$WS/work/test-acme/recon/exposures.json" 2>/dev/null)
+expect "$got" "['kl-env-file', 'kl-git-config'] ['acme.test', 'app.acme.test'] ['acme.test', 'app.acme.test']" "only the planted files are reported, on the live hosts only (other.test is in scope only under /allowed, so never live); catch-all 200 pages don't match"
+grep -rq FAKE_GUARD_TEST_VALUE "$WS/work" && check bad "exposed file contents never stored" || check ok "exposed file contents never stored"
+sleep 1
+new=$(flows test-acme | tail -n +"$((before + 1))")
+n=$(echo "$new" | python3 -c 'import json,sys; rs=[json.loads(l) for l in sys.stdin if l.strip()]; print(len(rs) > 0 and all(r.get("actor")=="tool:nuclei" for r in rs))')
+expect "$n" "True" "every exposure request in the flow log as tool:nuclei"
+got=$(host/bounty recon list test-acme --json | jget '[(r["exposures"], "exposed" in r["signals"]) for r in d if r["host"]=="app.acme.test"]')
+expect "$got" "[(['kl-env-file', 'kl-git-config'], True)]" "recon list shows the exposures"
+
 echo "== (l) rate_limit_rps 0: only human traffic"
 use test-acme-norate
 expect "$(req human https://app.acme.test/l1)" "200 " "human (terminal, Burp) allowed"
@@ -494,6 +510,8 @@ host/bounty recon map >/dev/null 2>&1; rc=$?
 expect "$rc" 6 "recon map refused when the program forbids automation"
 host/bounty ac replay "$wid" >/dev/null 2>&1; rc=$?
 expect "$rc" 6 "ac replay refused when the program forbids automation"
+host/bounty recon exposures >/dev/null 2>&1; rc=$?
+expect "$rc" 6 "recon exposures refused when the program forbids automation"
 
 echo "== (m) a profile that breaks while active: refuse all and say why"
 echo test-broken > "$WS/active"

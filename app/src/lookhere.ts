@@ -18,6 +18,7 @@ export type ReconRow = {
   tech: string[];
   urls: number;
   signals: string[];
+  exposures?: string[];
   interest: number;
 };
 
@@ -45,8 +46,9 @@ export function setupLookHere(opts: {
   let shown: ReconRow[] = [];
   let opened: string | null = null;     // URL in the "open in Burp" bar
   let copied = false;
-  // One map at a time, for the program that was active when it started.
-  let map: { handle: string; done: number; total: number; text: string } | null = null;
+  // One job (map or exposure check) at a time, for the program that was active when it started.
+  type Job = "map" | "exposures";
+  let map: { kind: Job; handle: string; done: number; total: number; text: string } | null = null;
   let mapError = "";
 
   const panel = $("lh");
@@ -90,30 +92,37 @@ export function setupLookHere(opts: {
     opts.onClose();
   }
 
-  /** Why `m` can't run now, or null when it can. */
+  const VERB: Record<Job, string> = { map: "Mapping", exposures: "Checking exposures on" };
+
+  /** Why `m` / `e` can't run now, or null when it can. */
   function mapBlocked(): string | null {
     const active = opts.active();
-    if (map) return map.handle === handle ? null : `Mapping ${opts.nameOf(map.handle)}. One map runs at a time.`;
+    if (map) return map.handle === handle ? null : `${VERB[map.kind]} ${opts.nameOf(map.handle)}. One run at a time.`;
     if (!active) return "Guard off. Mapping sends traffic through the scope guard: press Esc, then u on this program to load it.";
     if (active !== handle) return `The guard has ${opts.nameOf(active)} loaded, and mapping only runs for that program. Press Esc, then u here to switch.`;
     return null;
   }
 
-  async function runMap() {
+  async function runMap(kind: Job = "map") {
     if (map || mapBlocked() || !handle) return;
+    if (kind === "exposures" && !rows.some((r) => r.live)) {
+      mapError = "No live hosts yet: press m to map first, then e.";
+      draw();
+      return;
+    }
     const h = handle;
-    map = { handle: h, done: 0, total: 0, text: "" };
+    map = { kind, handle: h, done: 0, total: 0, text: "" };
     mapError = "";
     draw();
     const channel = new Channel<SyncEvent>();
     let finished = false;
     channel.onmessage = (ev) => {
-      if (ev.kind === "progress") { map = { handle: h, done: ev.done, total: ev.total, text: ev.text }; draw(); }
+      if (ev.kind === "progress") { map = { kind, handle: h, done: ev.done, total: ev.total, text: ev.text }; draw(); }
       else if (ev.kind === "done") { finished = true; map = null; draw(); if (handle === h) void load(); }
       else if (ev.kind === "error") { finished = true; map = null; mapError = ev.message; draw(); }
     };
     try {
-      await invoke("bounty_recon_map", { onEvent: channel });
+      await invoke(kind === "map" ? "bounty_recon_map" : "bounty_recon_exposures", { onEvent: channel });
     } catch (e) {
       if (!finished) mapError = String(e);
     } finally {
@@ -163,21 +172,26 @@ export function setupLookHere(opts: {
     tog.replaceChildren(el("span", "", `${showOut ? "Hide" : "Show"} ${out} out of scope`), k);
 
     // Map button and its line
-    const mb = $<HTMLButtonElement>("lh-map");
     const blocked = mapBlocked();
     const mine = map?.handle === handle;
-    mb.disabled = !!blocked || mine;
-    mb.classList.toggle("spinning", mine);
-    mb.toggleAttribute("aria-busy", mine);
-    const mk = el("kbd", "", "m");
-    mk.setAttribute("aria-hidden", "true");
-    mb.replaceChildren(el("span", "", mine ? "Mapping…" : "Map hosts"), mk);
+    for (const [id, kind, label, busy, key] of [["lh-map", "map", "Map hosts", "Mapping…", "m"],
+      ["lh-exp", "exposures", "Exposures", "Checking…", "e"]] as const) {
+      const b = $<HTMLButtonElement>(id);
+      const running = mine && map?.kind === kind;
+      b.disabled = !!blocked || mine;
+      b.classList.toggle("spinning", running);
+      b.toggleAttribute("aria-busy", running);
+      const kb = el("kbd", "", key);
+      kb.setAttribute("aria-hidden", "true");
+      b.replaceChildren(el("span", "", running ? busy : label), kb);
+    }
     const ml = $("lh-map-line");
     let mt = "", kind = "";
     if (mine && map) {
-      mt = map.total ? `Mapping ${map.done}/${map.total}: ${map.text}` : "Starting the map through the guard…";
+      mt = map.total ? `${VERB[map.kind]} ${map.done}/${map.total}: ${map.text}`
+        : map.kind === "map" ? "Starting the map through the guard…" : "Starting the exposure checks through the guard…";
       kind = "running";
-    } else if (mapError) { mt = `Map failed: ${mapError}`; kind = "error"; }
+    } else if (mapError) { mt = mapError.startsWith("No live hosts") ? mapError : `Run failed: ${mapError}`; kind = "error"; }
     else if (blocked) { mt = blocked; kind = "blocked"; }
     ml.textContent = mt;
     ml.dataset.kind = kind;
@@ -238,7 +252,11 @@ export function setupLookHere(opts: {
     if (r.tech.length) tech.title = r.tech.join(", ");
     const urls = el("td", "num urls", r.urls ? String(r.urls) : DASH);
     const sig = el("td", "signals");
-    for (const s of r.signals) sig.append(el("span", `sig sig-${s}`, s));
+    for (const s of r.signals) {
+      const chip = el("span", `sig sig-${s}`, s);
+      if (s === "exposed" && r.exposures?.length) chip.title = `Possible: ${r.exposures.join(", ")}. Confirm in Burp.`;
+      sig.append(chip);
+    }
 
     tr.append(it, host, st, title, tech, urls, sig);
     tr.addEventListener("click", () => { selected = i; markSelected(); });
@@ -274,6 +292,7 @@ export function setupLookHere(opts: {
       case "o": openHost(); break;
       case "y": void copy(); break;
       case "m": void runMap(); break;
+      case "e": void runMap("exposures"); break;
       case "x": showOut = !showOut; draw(); break;
       case "Escape": if (opened) { opened = null; draw(); } else close(); break;
       case "l": close(); break;
@@ -286,6 +305,7 @@ export function setupLookHere(opts: {
   $("lh-close").addEventListener("click", close);
   $("lh-out").addEventListener("click", () => { showOut = !showOut; draw(); });
   $("lh-map").addEventListener("click", () => void runMap());
+  $("lh-exp").addEventListener("click", () => void runMap("exposures"));
   $("lh-copy").addEventListener("click", () => void copy());
 
   // Rust finished passive recon for a program (§10.4).

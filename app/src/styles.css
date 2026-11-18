@@ -868,6 +868,8 @@ tr.join .total .tbar {
 .lh-table .signals { width: 1%; }
 .sig { display: inline-block; margin-right: 3px; padding: 0 5px; border: 1px solid var(--hair); border-radius: 4px; color: var(--ink-soft); font-size: 0.85em; line-height: 1.5; }
 .sig-login, .sig-admin, .sig-upload, .sig-debug { color: var(--stop); border-color: color-mix(in srgb, var(--stop) 35%, var(--field)); }
+.sig-exposed { color: var(--field); background: var(--stop); border-color: var(--stop); font-weight: 700; }
+.lh-exp.spinning, .lh-exp:disabled { color: var(--ink-soft); }
 .sig-api, .sig-graphql, .sig-swagger { color: var(--cta); border-color: color-mix(in srgb, var(--cta) 40%, var(--field)); }
 .lh-foot { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 2px 0 10px; color: var(--ink-soft); font-size: 0.9em; }
 .lh-foot kbd + kbd { margin-left: 2px; }

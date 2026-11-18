@@ -1,0 +1,193 @@
+#!/usr/bin/python3 -I
+"""bounty-exposures [--limit N]   (CONTRACTS §10.6; started by `host/bounty recon exposures` through
+`bounty-run --actor human`, so it runs as hunter in /bounty/work/<handle>)
+
+Runs kali-lab's own curated nuclei checks (/usr/local/share/bounty/nuclei: exposed .git, .env, SQL
+dumps, actuator, API definitions, …; GETs only, no redirects followed) against the hosts a map found
+live (recon/live.jsonl), one host at a time at the program's rate, every request through the guard as
+tool:nuclei. Each host is re-checked with the guard's matcher first. Response bodies are never kept:
+a hit is the check id, the URL and when, to confirm by hand in Burp.
+
+Writes recon/exposures.json {"checked": {host: ts}, "hits": [{"host","url","check","name","severity","ts"}]}
+(a host's old hits are replaced when it is checked again). Progress on stderr:
+`bounty: progress: <done>/<total> <host>`.
+Exit: 0 done; 1 no live hosts (map first); 64 usage; 130 interrupted (partial results kept).
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.parse
+
+SHARE = os.environ.get("BOUNTY_SHARE", "/usr/local/share/bounty")
+sys.path.insert(0, SHARE)
+import guard_policy as gp  # noqa: E402
+
+TEMPLATES = os.path.join(SHARE, "nuclei")
+PROXY = "http://127.0.0.1:8080"
+PROGRAMS = "/bounty/programs"
+WORK = "/bounty/work"
+HOST_TIMEOUT = 600
+_children = []
+
+
+def log(line):
+    sys.stderr.write("bounty: " + line + "\n")
+    sys.stderr.flush()
+
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def read_jsonl(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    v = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(v, dict):
+                    out.append(v)
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def write_atomic(path, text):
+    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=os.path.dirname(path))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def targets(policy, live):
+    """[(host, root_url)] for hosts that answered a map, in scope for the guard, once each."""
+    seen, out = set(), []
+    for r in live:
+        host = gp.norm_host(r.get("host") or "")
+        if not host or host in seen or r.get("status") is None:
+            continue
+        url = r.get("final_url") or r.get("url") or ""
+        p = urllib.parse.urlsplit(url)
+        if p.scheme not in ("http", "https") or gp.norm_host(p.hostname or "") != host:
+            p = urllib.parse.urlsplit("https://" + host)
+        reason, category = policy.host_decision(host)
+        if reason is None and category == "target":
+            seen.add(host)
+            out.append((host, "%s://%s" % (p.scheme, p.netloc)))
+    return out
+
+
+def rate(profile):
+    rps = (profile.get("rules") or {}).get("rate_limit_rps")
+    return 2 if rps is None else max(1, int(rps))
+
+
+def check(host, root, rl):
+    cmd = ["nuclei", "-u", root, "-t", TEMPLATES, "-j", "-or", "-ot", "-silent", "-nc", "-duc", "-ni",
+           "-rl", str(rl), "-c", "1", "-bs", "1", "-timeout", "10", "-retries", "0", "-mhe", "5",
+           "-H", "X-Bounty-Actor: tool:nuclei", "-proxy", PROXY]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    _children.append(p)
+    hits, start = [], time.time()
+    try:
+        for line in p.stdout:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            info = r.get("info") or {}
+            tid = r.get("template-id") or r.get("templateID")
+            if not tid or not str(tid).startswith("kl-"):
+                continue
+            hits.append({"host": host, "url": r.get("matched-at") or root, "check": tid,
+                         "name": info.get("name"), "severity": info.get("severity"), "ts": now()})
+            if time.time() - start > HOST_TIMEOUT:
+                break
+    finally:
+        if p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        _children.remove(p)
+    return hits
+
+
+def stop(_sig, _frame):
+    for p in list(_children):
+        try:
+            p.terminate()
+        except OSError:
+            pass
+    raise KeyboardInterrupt
+
+
+def main(argv):
+    limit = None
+    if argv[:1] == ["--limit"] and len(argv) == 2 and argv[1].isdigit():
+        limit = int(argv[1])
+    elif argv:
+        sys.stderr.write("usage: bounty-exposures [--limit N]\n")
+        return 64
+    handle = os.environ.get("BOUNTY_HANDLE") or ""
+    if not gp.HANDLE_RE.match(handle):
+        log("usage: BOUNTY_HANDLE is not set (run it through host/bounty recon exposures)")
+        return 64
+    try:
+        with open(os.path.join(PROGRAMS, handle, "program.json"), encoding="utf-8") as f:
+            profile = json.load(f)
+        policy = gp.Policy(profile, "check", None, handle)
+    except (OSError, ValueError, gp.PolicyError) as e:
+        log("profile: %s: %s" % (handle, getattr(e, "message", e)))
+        return 1
+    d = os.path.join(WORK, handle, "recon")
+    os.makedirs(d, exist_ok=True)
+    todo = targets(policy, read_jsonl(os.path.join(d, "live.jsonl")))
+    if limit:
+        todo = todo[:limit]
+    if not todo:
+        log("nothing: no live hosts yet (map the program first: m, or host/bounty recon map)")
+        return 1
+    rl = rate(profile)
+    signal.signal(signal.SIGTERM, stop)
+    path = os.path.join(d, "exposures.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            state = json.load(f)
+    except (OSError, ValueError):
+        state = {}
+    state.setdefault("checked", {})
+    state.setdefault("hits", [])
+
+    def save():
+        write_atomic(path, json.dumps(state, indent=1, sort_keys=True) + "\n")
+
+    found = 0
+    try:
+        for i, (host, root) in enumerate(todo):
+            log("progress: %d/%d %s" % (i, len(todo), host))
+            hits = check(host, root, rl)
+            state["hits"] = [h for h in state["hits"] if h.get("host") != host] + hits
+            state["checked"][host] = now()
+            found += len(hits)
+            save()
+        log("progress: %d/%d done" % (len(todo), len(todo)))
+    except KeyboardInterrupt:
+        save()
+        log("interrupted: partial results kept")
+        return 130
+    print("%s: checked %d hosts, %d possible exposures (confirm each by hand)" % (handle, len(todo), found))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

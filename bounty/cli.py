@@ -103,6 +103,8 @@ def build_parser():
     rp.add_argument("--domain", help="query this base domain instead of every in-scope wildcard")
     rm = rcs.add_parser("map", help="httpx + katana on the ACTIVE program's in-scope hosts, through the guard")
     rm.add_argument("--limit", type=int, metavar="N", help="map at most N hosts")
+    rx = rcs.add_parser("exposures", help="curated checks (.git, .env, dumps, actuator…) on the ACTIVE program's live hosts")
+    rx.add_argument("--limit", type=int, metavar="N", help="check at most N hosts")
     rl = rcs.add_parser("list", help="hosts ranked by interest")
     rl.add_argument("handle")
     rl.add_argument("--json", action="store_true")
@@ -320,6 +322,7 @@ def main(argv=None):
         ("recon", "passive"): lambda a, w: recon_mod.passive(w, a.handle, a.domain),
         ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit),
         ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
+        ("recon", "exposures"): lambda a, w: recon_mod.exposures_cmd(w, a.limit),
         ("ac", "session"): lambda a, w: ac_mod.session(w, a.who, a.marker, a.clear),
         ("ac", "status"): lambda a, w: ac_mod.status(w, a.json),
         ("ac", "candidates"): lambda a, w: ac_mod.candidates(w, a.since, a.limit, a.json),

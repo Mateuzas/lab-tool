@@ -167,13 +167,18 @@ const DROPBOX: R[] = [
   ["www.dropbox.com", "in-scope", false, true, 200, "Dropbox", ["React", "Envoy"], 300, ["login", "upload", "js-heavy"]],
   ["api.dropboxapi.com", "in-scope", false, true, 400, "Error in call to API function", ["Envoy"], 41, ["api", "swagger"]],
   ["status.dropbox.com", "in-scope", false, true, 200, "Dropbox Status", ["Statuspage"], 17, []],
+  ["legacy-tools.dropboxer.net", "in-scope", false, true, 200, "Index of /", ["Apache"], 6, ["exposed"]],
   ["staging-paper.dropbox.com", "in-scope", false, false, null, null, [], 0, []],
   ["community.dropbox.com", "out-of-scope", false, true, 200, "Dropbox Community", ["Khoros"], 0, ["login"]],
   ["blog.dropbox.com", "out-of-scope", false, true, 200, "Dropbox Blog", ["WordPress"], 0, []],
   ["help.dropbox.com", "not-in-scope", true, true, 200, "Dropbox Help Center", ["Next.js"], 0, []],
 ];
-const interest = (r: R) => Math.min(1, (r[2] ? 0.35 : 0) + (r[3] ? 0.15 : 0) + 0.1 * r[8].length);
-const toRow = (r: R) => ({ host: r[0], scope: r[1], new: r[2], live: r[3], status: r[4], title: r[5], tech: r[6], urls: r[7], signals: r[8], interest: interest(r) });
+// Same formula as bounty/recon.py: an exposure hit is +0.3, and "exposed" isn't counted as a signal too.
+const exposed = (r: R) => r[8].includes("exposed");
+const interest = (r: R) => Math.round(100 * Math.min(1, (r[2] ? 0.35 : 0) + (r[3] ? 0.15 : 0)
+  + 0.1 * r[8].filter((s) => s !== "exposed").length + (exposed(r) ? 0.3 : 0))) / 100;
+const toRow = (r: R) => ({ host: r[0], scope: r[1], new: r[2], live: r[3], status: r[4], title: r[5], tech: r[6], urls: r[7], signals: r[8],
+  exposures: exposed(r) ? ["kl-env-file", "kl-git-config"] : [], interest: interest(r) });
 let reconExtra: R[] = [];
 function reconList(handle: string) {
   let list: R[];
@@ -291,7 +296,7 @@ async function bountyRefresh(channel: { id: number }) {
     if (cmd === "bounty_ranking") { await sleep(progMode === "loading" ? 60000 : 40); return ranking(); }
     if (cmd === "bounty_refresh") return bountyRefresh(args.onEvent as unknown as { id: number });
     if (cmd === "bounty_recon_list") { await sleep(60); return reconList(args.handle); }
-    if (cmd === "bounty_recon_map") {
+    if (cmd === "bounty_recon_map" || cmd === "bounty_recon_exposures") {
       if (guard.status !== "active") throw "bounty: guard: no active program (exit 5)";
       return reconMap(args.onEvent as unknown as { id: number });
     }

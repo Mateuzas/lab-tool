@@ -1,0 +1,28 @@
+id: kl-wp-config-backup
+info:
+  name: WordPress config backup exposed
+  author: kali-lab
+  severity: high
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/wp-config.php.bak"
+      - "{{RootURL}}/wp-config.php~"
+      - "{{RootURL}}/wp-config.old"
+    max-size: 65536
+    redirects: false
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["DB_PASSWORD"]
+      - type: word
+        part: header
+        words: ["text/html"]
+        negative: true

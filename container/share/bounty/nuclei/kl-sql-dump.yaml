@@ -1,0 +1,30 @@
+id: kl-sql-dump
+info:
+  name: Exposed SQL dump
+  author: kali-lab
+  severity: high
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/backup.sql"
+      - "{{RootURL}}/dump.sql"
+      - "{{RootURL}}/database.sql"
+      - "{{RootURL}}/db.sql"
+    max-size: 65536
+    redirects: false
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["CREATE TABLE", "INSERT INTO"]
+        condition: or
+      - type: word
+        part: header
+        words: ["text/html"]
+        negative: true

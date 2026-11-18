@@ -1,0 +1,21 @@
+id: kl-svn-wcdb
+info:
+  name: Exposed Subversion wc.db
+  author: kali-lab
+  severity: medium
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/.svn/wc.db"
+    max-size: 65536
+    redirects: false
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        part: body
+        words: ["SQLite format 3"]

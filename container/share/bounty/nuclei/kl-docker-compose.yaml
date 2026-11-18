@@ -1,0 +1,27 @@
+id: kl-docker-compose
+info:
+  name: Exposed docker-compose file
+  author: kali-lab
+  severity: medium
+  description: kali-lab curated exposure check (CONTRACTS §10.6). A hit is a lead to confirm by hand.
+  tags: kali-lab,exposure
+
+http:
+  - method: GET
+    path:
+      - "{{RootURL}}/docker-compose.yml"
+      - "{{RootURL}}/docker-compose.yaml"
+    max-size: 65536
+    redirects: false
+    stop-at-first-match: true
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: regex
+        part: body
+        regex: ["(?m)^services:"]
+      - type: word
+        part: header
+        words: ["text/html"]
+        negative: true
