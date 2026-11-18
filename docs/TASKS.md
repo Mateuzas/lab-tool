@@ -76,8 +76,9 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | FE-5 | Frontender | Status line "Next sync 14:20", reload on `bounty-synced`, recent alerts in the changes panel (CONTRACTS §9.2) | done (#23) |
 | BE-21 | Backender | Private programs: list of programs that need joining with their list-field rank, application state you mark by hand (applied / accepted / rejected), `access-granted` closes the loop | done |
 | BE-18 | Backender | Recon (CONTRACTS §10): automatic passive (crt.sh + DNS, guard matcher), on-key active map of the active program (httpx + katana via the guard), `recon list`, `program-closed` kind, Tauri commands | done |
-| FE-6 | Frontender | Look-here panel (`l`), map key (`m`) with progress, new-host highlight (CONTRACTS §10.4) | in progress |
-| BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | todo |
+| FE-6 | Frontender | Look-here panel (`l`), map key (`m`) with progress, new-host highlight (CONTRACTS §10.4) | done |
+| BE-19 | Backender | Two-account access-control checker in the guard (Autorize-like): replay each request of account A with account B's session and with none, flag responses that match A's; within scope and rate; manual confirmation always | done |
+| FE-9 | Frontender | Access-control check in the app: session status, candidates list (pick with space), replay with progress, results with CHECK rows first (CONTRACTS §13) | todo |
 | BE-7 | Architect | `hunter/` Claude copilot (CONTRACTS §12.2) | done |
 | BE-24 | Backender | `host/bounty shell` + `bounty_open_shell` / `bounty_open_hunter` (CONTRACTS §12.1, §12.3) | done |
 | FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | done |

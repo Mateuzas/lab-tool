@@ -439,6 +439,47 @@ expect "$n" 0 "map sent nothing towards out-of-scope / not-in-scope names"
 got=$(host/bounty recon list test-acme --json | jget '[(r["host"], r["live"]) for r in d if r["host"]=="app.acme.test"]')
 expect "$got" "[('app.acme.test', True)]" "recon list shows the mapped host as live"
 
+echo "== (q) two-account access-control check (CONTRACTS §13)"
+use test-acme
+SA=aaaaaaaaaaaaaaaaaaaa; SB=bbbbbbbbbbbbbbbbbbbb
+for pth in idor protected public own app.js; do
+  docker exec "$C" bounty-run --actor human -- curl -s -o /dev/null -b "sid=$SA; theme=dark" "https://app.acme.test/ac/$pth"
+done
+docker exec "$C" bounty-run --actor human -- curl -s -o /dev/null -b "sid=$SA" -X POST -d x=1 https://app.acme.test/ac/write
+printf 'Cookie: sid=%s\n' "$SA" | host/bounty ac session a --marker alice@acme.test >/dev/null 2>&1; rc=$?
+expect "$rc" 0 "ac session a from stdin"
+printf 'Cookie: sid=%s\n' "$SB" | host/bounty ac session b >/dev/null 2>&1
+printf 'nonsense\n' | host/bounty ac session b >/dev/null 2>&1; rc=$?
+expect "$rc" 64 "ac session refuses input without a header line"
+printf 'Cookie: sid=%s\n' "$SB" | host/bounty ac session b >/dev/null 2>&1
+got=$(host/bounty ac status --json | jget '(d["a"]["names"], d["a"]["markers"], d["b"]["names"])')
+expect "$got" "(['Cookie'], 1, ['Cookie'])" "ac status shows header names only"
+host/bounty ac status --json | grep -q "$SA" && check bad "ac status never prints a session value" || check ok "ac status never prints a session value"
+cand=$(host/bounty ac candidates --json)
+got=$(echo "$cand" | jget 'sorted((r["url"].rsplit("/",1)[1], r["safe"]) for r in d)')
+expect "$got" "[('idor', True), ('own', True), ('protected', True), ('public', True), ('write', False)]" "candidates: A's requests, static files skipped, POST marked unsafe"
+ids=$(echo "$cand" | jget '" ".join(r["flow_id"] for r in d if r["safe"])')
+wid=$(echo "$cand" | jget '[r["flow_id"] for r in d if not r["safe"]][0]')
+host/bounty ac replay "$wid" >/dev/null 2>&1; rc=$?
+expect "$rc" 64 "ac replay refuses a POST without --unsafe"
+before=$(docker exec "$T" sh -c 'wc -l < /tmp/requests.log')
+host/bounty ac replay $ids >"$WS/ac.out" 2>"$WS/ac.err"; rc=$?
+expect "$rc" 0 "ac replay exits 0"
+got=$(host/bounty ac results --json | jget 'sorted((r["url"].rsplit("/",1)[1], r["hint"], r["b"]["verdict"], r["none"]["verdict"]) for r in d)')
+expect "$got" "[('idor', 'likely-broken-access', 'leak', 'blocked'), ('own', 'none', 'differs', 'blocked'), ('protected', 'none', 'blocked', 'blocked'), ('public', 'public', 'same-as-a', 'same-as-a')]" "verdicts: IDOR flagged, own data and 403 not, public marked public"
+sent=$(docker exec "$T" sh -c "tail -n +$((before + 1)) /tmp/requests.log")
+n=$(echo "$sent" | grep -c "sid=$SA")
+expect "$n" 0 "replays never carried account A's session"
+n=$(echo "$sent" | grep -c "sid=$SB")
+expect "$n" 4 "each request replayed once as B"
+n=$(echo "$sent" | grep -c '"/ac/write"')
+expect "$n" 0 "the POST was not replayed"
+sleep 1
+n=$(flows test-acme | python3 -c 'import json,sys; print(sum(1 for l in sys.stdin if l.strip() and json.loads(l).get("actor")=="tool:ac-check"))')
+expect "$n" 8 "replays in the flow log as tool:ac-check (B + none per request)"
+grep -rq "$SA" "$WS/work" && check bad "no session value written to the workspace" || check ok "no session value written to the workspace"
+as_root sh -c 'stat -c %a /dev/shm/bounty-ac/test-acme/a.json' | grep -q '^600$' && check ok "sessions in tmpfs, root 0600" || check bad "sessions in tmpfs, root 0600"
+
 echo "== (l) rate_limit_rps 0: only human traffic"
 use test-acme-norate
 expect "$(req human https://app.acme.test/l1)" "200 " "human (terminal, Burp) allowed"
@@ -451,6 +492,8 @@ docker exec "$C" bounty-run --actor claude -- ffuf -u https://app.acme.test/FUZZ
 expect "$rc" 6 "bounty-run --actor claude with an active tool exits 6"
 host/bounty recon map >/dev/null 2>&1; rc=$?
 expect "$rc" 6 "recon map refused when the program forbids automation"
+host/bounty ac replay "$wid" >/dev/null 2>&1; rc=$?
+expect "$rc" 6 "ac replay refused when the program forbids automation"
 
 echo "== (m) a profile that breaks while active: refuse all and say why"
 echo test-broken > "$WS/active"

@@ -5,6 +5,7 @@ import json
 import os
 import sys
 
+from bounty import ac as ac_mod
 from bounty import applications
 from bounty import changes as changes_mod
 from bounty import guard as guard_mod
@@ -105,6 +106,27 @@ def build_parser():
     rl = rcs.add_parser("list", help="hosts ranked by interest")
     rl.add_argument("handle")
     rl.add_argument("--json", action="store_true")
+
+    acp = sub.add_parser("ac", help="two-account access-control check, on demand (CONTRACTS §13)")
+    acs = acp.add_subparsers(dest="cmd")
+    se = acs.add_parser("session", help="set a test account's session from header lines on stdin")
+    se.add_argument("who", choices=("a", "b"))
+    se.add_argument("--marker", action="append", metavar="TEXT",
+                    help="text only account A's data contains (its email, user id); repeatable")
+    se.add_argument("--clear", action="store_true", help="forget this account's session")
+    ast = acs.add_parser("status", help="which sessions are set (header names only)")
+    ast.add_argument("--json", action="store_true")
+    ca = acs.add_parser("candidates", help="requests made as account A that can be replayed")
+    ca.add_argument("--since", type=float, default=24.0, metavar="HOURS")
+    ca.add_argument("--limit", type=int, default=50, metavar="N")
+    ca.add_argument("--json", action="store_true")
+    rp_ = acs.add_parser("replay", help="replay A's requests as B and with no session, through the guard")
+    rp_.add_argument("ids", nargs="+", metavar="FLOW_ID")
+    rp_.add_argument("--unsafe", action="append", metavar="FLOW_ID",
+                     help="allow this non-GET request to be replayed (it may change data)")
+    ar = acs.add_parser("results", help="replay results, likely broken access first")
+    ar.add_argument("--handle")
+    ar.add_argument("--json", action="store_true")
     return p
 
 
@@ -298,6 +320,11 @@ def main(argv=None):
         ("recon", "passive"): lambda a, w: recon_mod.passive(w, a.handle, a.domain),
         ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit),
         ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
+        ("ac", "session"): lambda a, w: ac_mod.session(w, a.who, a.marker, a.clear),
+        ("ac", "status"): lambda a, w: ac_mod.status(w, a.json),
+        ("ac", "candidates"): lambda a, w: ac_mod.candidates(w, a.since, a.limit, a.json),
+        ("ac", "replay"): lambda a, w: ac_mod.replay(w, a.ids, a.unsafe),
+        ("ac", "results"): lambda a, w: ac_mod.results(w, a.handle, a.json),
     }
     fn = handlers.get((args.group, getattr(args, "cmd", None)))
     if fn is None:

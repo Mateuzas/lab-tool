@@ -484,3 +484,53 @@ the user. WebFetch/WebSearch, curl/wget/nc on the Mac, and Burp's send tools are
 Programs screen keys **`t`** (terminal) and **`h`** (Claude copilot), shown as two compact buttons
 next to the guard indicator and in the `?` overlay. Disabled with a tooltip when the guard is off or
 no program is active. Errors show in the existing status line.
+
+## 13. Two-account access-control check (BE-19)
+
+User decision 2026-11-18: **on demand only.** You browse as test account A (Burp or the terminal,
+through the guard); when you choose, the checker replays requests you pick from the flow log as
+account B and with no session, and flags responses that look like A's. Nothing is replayed
+automatically, and every flag is a hint to confirm by hand in Burp.
+
+### 13.1 Sessions (never on disk)
+`host/bounty ac session a|b [--marker TEXT]...` reads header lines (`Cookie: …`,
+`Authorization: …`, any `Name: value`) from **stdin** (never argv, so never in `ps` or shell
+history) and stores them for the guard's active program in the container's tmpfs
+(`/dev/shm/bounty-ac/<handle>/<a|b>.json`, root, 0600). `--marker` is text only A's data contains
+(A's email, user id); stored the same way. `ac session a|b --clear` removes one. A container restart
+clears all sessions. `host/bounty ac status [--json]` prints per account the header **names**, the
+number of markers and when it was set; never a value. Exit 64 when stdin has no `Name: value` line.
+
+### 13.2 Candidates
+`host/bounty ac candidates [--since HOURS (24)] [--limit N (50)] [--json]` (guard's active program):
+allowed, in-scope (`category` target) flows with a 2xx answer whose request carries A's session
+and not B's, read from the guard's `.mitm` files. A's session matches when the request has A's
+`Authorization` or other non-cookie header with the same value, or any of A's cookies whose value
+is ≥ 16 characters. Static files (js, css, images, fonts, maps) are skipped; one row per
+method + URL (newest). Row: `{"flow_id","ts","method","url","status","length","safe":bool}` (URL query
+values for token-like keys shown as `***`). `safe` = GET, HEAD or OPTIONS.
+
+### 13.3 Replay
+`host/bounty ac replay FLOW_ID... [--unsafe FLOW_ID]...` (active program only; exit 3 guard not
+running, 5 no program, 6 the profile forbids automation, 64 a session missing or an id unknown).
+For each flow: the request is rebuilt from the `.mitm` (method, URL, body, headers without hop-by-hop
+ones and without every header name in A's or B's session), then sent twice through the guard on the
+human port as `tool:ac-check`: once with B's session headers, once with none. Redirects are not
+followed. A's answer is the recorded one (not re-sent). A request whose method isn't safe is
+**refused** unless its id is also given with `--unsafe`. Sequential; the guard rate-limits. The root
+helper (`bounty-ac`, run with `docker exec`) reads sessions and flows, then drops to uid hunter before
+it opens any connection.
+
+Per variant (B, none): `status`, `length`, `similarity` to A's body (0..1, first 64 KB),
+`markers` (how many of A's `--marker` texts appear), `a_ids` (emails / UUIDs / ids of ≥ 6 digits
+found in A's body, not in the URL, that also appear in this body), and `verdict`:
+`blocked` (401, 403, 404, 405, 3xx, or not 2xx while A's was) · `leak` (a marker appears) ·
+`same-as-a` (similarity ≥ 0.95) · `a-data` (`a_ids` ≥ 1) · `differs`; and `refused` (the guard
+refused it, e.g. the scope changed; `refused: <reason>` kept) · `error` (no answer).
+A refusal for `automation-forbidden` stops the run (exit 6). Logic: `container/share/bounty/ac_core.py`.
+`hint` per request (flagged = `leak`, `same-as-a` or `a-data`): `likely-broken-access` when B is
+flagged and none is not; `public` when both are flagged (the data is probably public); `none`
+otherwise.
+Writes `work/<h>/ac/results.jsonl` (one line per replayed request:
+`{"ts","flow_id","method","url","a":{"status","length"},"b":{…},"none":{…},"hint"}`); **no bodies and
+no header values** are stored. `host/bounty ac results [--json]` prints them, flagged first.

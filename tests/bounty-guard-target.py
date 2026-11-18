@@ -17,6 +17,30 @@ CERT, KEY, LOG = sys.argv[1], sys.argv[2], sys.argv[3]
 lock = threading.Lock()
 
 
+# Access-control endpoints for the BE-19 check (CONTRACTS §13): sid A = alice, sid B = bob.
+AC_A, AC_B = "a" * 20, "b" * 20
+ALICE = {"owner": "alice@acme.test", "account": "1000001", "doc": "alice's travel plans for spring"}
+BOB = {"owner": "bob@acme.test", "account": "2000002", "doc": "bob keeps different notes here"}
+
+
+def ac_answer(method, path, cookie):
+    sid = "a" if "sid=" + AC_A in cookie else ("b" if "sid=" + AC_B in cookie else None)
+    route = path.split("?")[0]
+    if route == "/ac/public":
+        return 200, json.dumps({"news": "a public post", "id": "7777777"}).encode()
+    if sid is None:
+        return 401, b'{"error":"log in"}'
+    if route == "/ac/idor":                      # any logged-in user gets alice's document
+        return 200, json.dumps(ALICE).encode()
+    if route == "/ac/protected":
+        return (200, json.dumps(ALICE).encode()) if sid == "a" else (403, b'{"error":"not yours"}')
+    if route == "/ac/own":
+        return 200, json.dumps(ALICE if sid == "a" else BOB).encode()
+    if route in ("/ac/write", "/ac/app.js"):
+        return 200, json.dumps(ALICE).encode()
+    return 404, b"{}"
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -24,9 +48,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             self.rfile.read(length)
+        status = 200
         if self.path == "/ip":
             body = b"198.51.100.20\n"
             ctype = "text/plain"
+        elif self.path.startswith("/ac/"):
+            status, body = ac_answer(self.command, self.path, self.headers.get("Cookie") or "")
+            ctype = "application/json"
+            with lock, open(LOG, "a") as f:     # so the test can see which session each replay carried
+                f.write(json.dumps({"method": self.command, "path": self.path,
+                                    "headers": {k: v for k, v in self.headers.items()}}) + "\n")
         else:
             info = {"method": self.command, "path": self.path, "host": self.headers.get("Host"),
                     "tls": isinstance(self.connection, ssl.SSLSocket),
@@ -35,7 +66,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 f.write(json.dumps(info) + "\n")
             body = (json.dumps(info) + "\n").encode()
             ctype = "application/json"
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

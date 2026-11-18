@@ -1,0 +1,318 @@
+#!/usr/bin/python3 -I
+"""bounty-ac <cmd> --handle H ...   (CONTRACTS §13; run as root with `docker exec` by host/bounty ac)
+
+  session-set --who a|b         stdin: {"headers": "<Name: value lines>", "markers": [...]}
+  session-clear --who a|b
+  status                        JSON: per account header names, marker count, set_at (never values)
+  candidates [--since H] [--limit N]   JSON rows of A's replayable flows
+  replay --ids ID,... [--unsafe ID,...]   B + no-session replays through the guard as tool:ac-check
+
+Root is needed only to read the sessions (tmpfs, root 0600) and the guard's .mitm flows. replay
+reads everything it needs first, then drops to uid hunter before opening any connection; every
+request goes to the guard (127.0.0.1:8080), which checks scope, rate and identification, labels it
+tool:ac-check and logs it. Exit: 0; 6 the guard refuses automated tools; 64 usage / missing session /
+unknown id; 70 internal.
+"""
+
+import argparse
+import datetime
+import glob
+import http.client
+import json
+import os
+import ssl
+import sys
+import time
+import urllib.parse
+
+SHARE = os.environ.get("BOUNTY_SHARE", "/usr/local/share/bounty")
+sys.path.insert(0, SHARE)
+import ac_core as ac  # noqa: E402
+import guard_policy as gp  # noqa: E402
+
+SESS = "/dev/shm/bounty-ac"
+FLOWS = "/var/lib/bounty-guard/flows"
+WORK = "/bounty/work"
+PROXY = ("127.0.0.1", 8080)
+ACTOR = "tool:ac-check"
+HUNTER = 1000
+MAX_BODY = 1024 * 1024
+TIMEOUT = 30
+
+
+class Usage(Exception):
+    pass
+
+
+def log(line):
+    sys.stderr.write("bounty: " + line + "\n")
+    sys.stderr.flush()
+
+
+def now():
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# -- sessions -------------------------------------------------------------------------------------
+
+def sess_path(handle, who):
+    return os.path.join(SESS, handle, who + ".json")
+
+
+def load_session(handle, who):
+    try:
+        with open(sess_path(handle, who), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def cmd_session_set(a):
+    try:
+        data = json.loads(sys.stdin.read() or "{}")
+        headers = ac.parse_session(data.get("headers") or "")
+    except (ValueError, ac.SessionError) as e:
+        raise Usage(str(e))
+    markers = [m for m in data.get("markers") or [] if isinstance(m, str) and m.strip()]
+    os.makedirs(os.path.join(SESS, a.handle), mode=0o700, exist_ok=True)
+    os.chmod(SESS, 0o700)
+    p = sess_path(a.handle, a.who)
+    fd = os.open(p + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"headers": headers, "markers": markers, "set_at": now()}, f)
+    os.replace(p + ".tmp", p)
+    print(json.dumps({"who": a.who, "names": [n for n, _ in headers], "markers": len(markers)}))
+    return 0
+
+
+def cmd_session_clear(a):
+    try:
+        os.unlink(sess_path(a.handle, a.who))
+    except FileNotFoundError:
+        pass
+    return 0
+
+
+def cmd_status(a):
+    out = {}
+    for who in ("a", "b"):
+        s = load_session(a.handle, who)
+        out[who] = None if not s else {"names": [n for n, _ in s["headers"]], "markers": len(s.get("markers") or []),
+                                       "set_at": s.get("set_at")}
+    print(json.dumps(out))
+    return 0
+
+
+# -- flows ----------------------------------------------------------------------------------------
+
+def log_index(handle, since_hours):
+    """flow_id -> flow-log record for allowed target flows with a 2xx answer, newer than since."""
+    cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=since_hours)).strftime("%Y-%m-%dT%H:%M:%S")
+    idx = {}
+    for path in sorted(glob.glob(os.path.join(FLOWS, handle, "*.jsonl"))):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                st = r.get("status")
+                if (r.get("decision") == "allowed" and r.get("category") == "target" and isinstance(st, int)
+                        and 200 <= st < 300 and (r.get("ts") or "") >= cutoff and r.get("actor") != ACTOR):
+                    idx[r.get("flow_id")] = r
+    return idx
+
+
+def read_flows(handle, wanted):
+    """flow_id -> mitmproxy flow, for ids in `wanted`."""
+    from mitmproxy import io as mio
+    from mitmproxy.exceptions import FlowReadException
+    out = {}
+    for path in sorted(glob.glob(os.path.join(FLOWS, handle, "*.mitm"))):
+        with open(path, "rb") as f:
+            try:
+                for fl in mio.FlowReader(f).stream():
+                    if getattr(fl, "id", None) in wanted:
+                        out[fl.id] = fl
+            except FlowReadException:
+                pass   # the guard may be appending to today's file: stop at the cut
+    return out
+
+
+def headers_of(fl):
+    return [[k, v] for k, v in fl.request.headers.items(multi=True)]
+
+
+def body_of(msg):
+    if msg is None:
+        return b""
+    try:
+        b = msg.get_content(strict=False)
+    except Exception:  # an encoding mitmproxy can't undo: compare the raw bytes
+        b = msg.raw_content
+    return (b or b"")[:MAX_BODY]
+
+
+def candidates(handle, since_hours, sa, sb):
+    idx = log_index(handle, since_hours)
+    flows = read_flows(handle, set(idx))
+    rows = {}
+    for fid, fl in flows.items():
+        rec = idx[fid]
+        url = fl.request.pretty_url
+        h = headers_of(fl)
+        if ac.is_static(url) or not ac.matches(sa, h) or (sb and ac.matches(sb, h)):
+            continue
+        key = (fl.request.method, url)
+        row = {"flow_id": fid, "ts": rec.get("ts"), "method": fl.request.method, "url": ac.redact_url(url),
+               "status": rec.get("status"), "length": len(body_of(fl.response)),
+               "safe": ac.is_safe(fl.request.method)}
+        if key not in rows or (row["ts"] or "") > (rows[key]["ts"] or ""):
+            rows[key] = row
+    return sorted(rows.values(), key=lambda r: r["ts"] or "", reverse=True)
+
+
+def need_sessions(handle, both=True):
+    sa, sb = load_session(handle, "a"), load_session(handle, "b")
+    if not sa:
+        raise Usage("no session for account A: host/bounty ac session a < headers.txt")
+    if both and not sb:
+        raise Usage("no session for account B: host/bounty ac session b < headers.txt")
+    return sa, sb
+
+
+def cmd_candidates(a):
+    sa, sb = need_sessions(a.handle, both=False)
+    rows = candidates(a.handle, a.since, sa["headers"], (sb or {}).get("headers"))
+    print(json.dumps(rows[:a.limit]))
+    return 0
+
+
+# -- replay ---------------------------------------------------------------------------------------
+
+def send(method, url, headers, body):
+    """One request through the guard, no redirects followed -> (status, body, refused reason)."""
+    p = urllib.parse.urlsplit(url)
+    path = (p.path or "/") + ("?" + p.query if p.query else "")
+    hdrs = [(k, v) for k, v in headers if not k.startswith(":")]
+    if not any(k.lower() == "host" for k, _ in hdrs):   # an HTTP/2 flow carries :authority instead
+        hdrs.insert(0, ("Host", p.netloc))
+    hdrs.append(("X-Bounty-Actor", ACTOR))
+    if p.scheme == "https":
+        conn = http.client.HTTPSConnection(PROXY[0], PROXY[1], timeout=TIMEOUT, context=ssl.create_default_context())
+        conn.set_tunnel(p.hostname, p.port or 443)
+        target = path
+    else:
+        conn = http.client.HTTPConnection(PROXY[0], PROXY[1], timeout=TIMEOUT)
+        target = url
+    try:
+        conn.putrequest(method, target, skip_host=True, skip_accept_encoding=True)
+        for k, v in hdrs:
+            conn.putheader(k, v)
+        if body:
+            conn.putheader("Content-Length", str(len(body)))
+        conn.endheaders(body or None)
+        r = conn.getresponse()
+        data = r.read(MAX_BODY)
+        g = r.getheader("X-Bounty-Guard") or ""
+        refused = g.split("reason=", 1)[-1].strip() if g.startswith("refused") else None
+        return r.status, data, refused
+    except (OSError, http.client.HTTPException) as e:
+        # A CONNECT the guard refuses ends the tunnel with its 403: same as a refusal.
+        msg = str(e)
+        if "403" in msg:
+            return None, b"", "refused-at-connect"
+        return None, b"", None
+    finally:
+        conn.close()
+
+
+def drop_to_hunter():
+    os.setgroups([])
+    os.setgid(HUNTER)
+    os.setuid(HUNTER)
+    os.environ["HOME"] = "/home/hunter"
+
+
+def cmd_replay(a):
+    sa, sb = need_sessions(a.handle)
+    ids = [i for i in a.ids.split(",") if i]
+    unsafe = {i for i in (a.unsafe or "").split(",") if i}
+    if not ids:
+        raise Usage("no flow ids")
+    flows = read_flows(a.handle, set(ids))
+    missing = [i for i in ids if i not in flows]
+    if missing:
+        raise Usage("unknown flow id(s): %s (ac candidates lists them)" % ", ".join(missing))
+    plan = []
+    for fid in ids:
+        fl = flows[fid]
+        m = fl.request.method.upper()
+        if not ac.is_safe(m) and fid not in unsafe:
+            raise Usage("%s is a %s: replaying it as B could change data; add --unsafe %s to allow it" % (fid, m, fid))
+        if fl.response is None:
+            raise Usage("%s has no recorded answer" % fid)
+        plan.append({"fid": fid, "method": m, "url": fl.request.pretty_url, "headers": headers_of(fl),
+                     "body": fl.request.raw_content or b"", "a_status": fl.response.status_code,
+                     "a_body": body_of(fl.response)})
+    sessions = (sa["headers"], sb["headers"])
+    markers = sa.get("markers") or []
+    out_dir = os.path.join(WORK, a.handle, "ac")
+
+    drop_to_hunter()   # nothing above opened a connection; nothing below runs as root
+    os.makedirs(out_dir, exist_ok=True)
+    results = []
+    for i, p in enumerate(plan):
+        log("progress: %d/%d %s %s" % (i, len(plan), p["method"], ac.redact_url(p["url"])))
+        rec = {"ts": now(), "flow_id": p["fid"], "method": p["method"], "url": ac.redact_url(p["url"]),
+               "a": {"status": p["a_status"], "length": len(p["a_body"])}}
+        for name, use in (("b", sb["headers"]), ("none", None)):
+            st, body, refused = send(p["method"], p["url"], ac.rewrite(p["headers"], sessions, use), p["body"])
+            if refused == "automation-forbidden":
+                log("automation-forbidden: the guard refuses automated tools for %s" % a.handle)
+                return 6
+            rec[name] = ac.judge(p["a_status"], p["a_body"], p["url"], markers, st, body, refused)
+        rec["hint"] = ac.hint(rec["b"]["verdict"], rec["none"]["verdict"])
+        results.append(rec)
+        with open(os.path.join(out_dir, "results.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, sort_keys=True) + "\n")
+    log("progress: %d/%d done" % (len(plan), len(plan)))
+    print(json.dumps(results))
+    return 0
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="bounty-ac")
+    sub = p.add_subparsers(dest="cmd")
+    for name in ("session-set", "session-clear", "status", "candidates", "replay"):
+        s = sub.add_parser(name)
+        s.add_argument("--handle", required=True)
+        if name.startswith("session"):
+            s.add_argument("--who", choices=("a", "b"), required=True)
+        if name == "candidates":
+            s.add_argument("--since", type=float, default=24.0)
+            s.add_argument("--limit", type=int, default=50)
+        if name == "replay":
+            s.add_argument("--ids", required=True)
+            s.add_argument("--unsafe", default="")
+    a = p.parse_args(argv)
+    if os.geteuid() != 0:
+        log("usage: run bounty-ac as root via docker exec (it drops to hunter before sending)")
+        return 64
+    if not a.cmd or not gp.HANDLE_RE.match(a.handle or ""):
+        log("usage: bad handle")
+        return 64
+    fn = {"session-set": cmd_session_set, "session-clear": cmd_session_clear, "status": cmd_status,
+          "candidates": cmd_candidates, "replay": cmd_replay}[a.cmd]
+    try:
+        return fn(a)
+    except Usage as e:
+        log("usage: %s" % e)
+        return 64
+    except Exception as e:  # never dump request objects (they hold session values)
+        log("internal: %s" % type(e).__name__)
+        return 70
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
