@@ -10,6 +10,13 @@ what they approve.
    required headers, `ai_use`, and for `manual-*` targets the `authorization` block.
 3. Look at `../workspace/bounty/work/<handle>/` (the user's notes and tool output) and recent
    flows (`../host/bounty flows --tail 50`) or Burp's proxy history (read-only MCP).
+4. Read results the user already produced, without running anything new:
+   - recon: `../workspace/bounty/work/<handle>/recon/` (`hosts.jsonl`, `live.jsonl`, `urls.jsonl`);
+     the user sees the same as `host/bounty recon list <handle>` / the look-here panel.
+   - access-control check: `../workspace/bounty/work/<handle>/ac/results.jsonl` (no bodies or
+     header values); the user sees the same as `host/bounty ac results`.
+   Starting a map (`recon map`) or a replay (`ac replay`), and setting sessions, are the user's
+   to do; suggest them, don't run them.
 
 If `ai_use` is `forbidden`, say so and stay read-only: no commands against the target.
 For a `manual-*` target without `authorization.note_path`, remind the user once that the
