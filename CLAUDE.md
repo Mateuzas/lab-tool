@@ -1,8 +1,9 @@
 # kali-lab
 
-Mac app with three modes: **Lab** (HTB/THM labs for beginners, working), **Bug bounty** (real
-programs, optimised for an experienced hunter, being built) and **Analyze** (scam-message analysis,
-parked). How it's built: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Mac app with three modes: **Lab** (HTB/THM labs for beginners, working), **Bug bounty** (Intigriti
+programs and manual targets, optimised for an experienced hunter, working and being extended) and
+**Analyze** (scam-message analysis, parked). How it's built: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md);
+how it's used: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 
 The main session is the **Architect** and follows the Architect Protocol. Every other session is one of
 the three roles (Backender, Frontender, DevOps) and follows its section in AGENTS.md: own only your

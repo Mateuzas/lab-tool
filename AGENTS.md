@@ -1,7 +1,8 @@
 # Notes for agents and contributors
 
 Read [README.md](README.md), then [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/CONTRACTS.md](docs/CONTRACTS.md) and your tasks in [docs/TASKS.md](docs/TASKS.md).
+[docs/CONTRACTS.md](docs/CONTRACTS.md) and your tasks in [docs/TASKS.md](docs/TASKS.md). How the user works
+with Bug bounty mode: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
 Decisions and their reasons are in [docs/adr/](docs/adr/). Ask before changing scope or architecture.
 
 ## Roles and ownership
@@ -21,8 +22,9 @@ the protocol's `backend/ frontend/ infra/` folders map onto existing directories
 - `docs/` is the Architect's. If a contract is wrong, report it; don't edit it.
 - Each task gets its own branch (`<area>/<short-name>`) and worktree, and ends with a pull request into
   `main` (`gh pr create`). The Architect reviews and merges. Don't merge your own PR.
-- Before opening a PR: `make lint`, `make app-test` if `app/` changed, the tests your task names, and
-  `scripts/secrets.sh check` once it exists (OPS-1).
+- Before opening a PR: `make lint`, `make app-test` if `app/` changed, `python3 -m unittest discover
+  bounty` if `bounty/` changed, `tests/bounty-guard-test.sh` if the guard or `container/` changed
+  (local listeners only), the tests your task names, and `scripts/secrets.sh check`.
 - Report back in at most 25 lines: files changed, commands and results, contract deviations, open
   questions, and what you did **not** verify (e.g. "not run against a real program").
 
@@ -33,8 +35,10 @@ the protocol's `backend/ frontend/ infra/` folders map onto existing directories
 - **Secrets only through SOPS** (ADR 006): no plaintext tokens, `.ovpn` contents or API keys in git,
   logs, PR text, chat or test fixtures. Read them with `sops exec-env`, never write them to disk.
 - The container is never `--privileged`; published ports bind to `127.0.0.1` only.
-- The clone lives at `~/Developer/kali-lab`. Never put it (or a worktree) in an iCloud-synced folder
-  such as `~/Desktop`: git, Docker file sharing and gitleaks fail there (`mmap failed`, `resource busy`).
+- The clone lives at `~/Developer/kali-lab`; worktrees go beside it (e.g. `~/Developer/kali-lab-<task>`)
+  and point `BOUNTY_WORKSPACE` at the main clone's `workspace/bounty` when they need data. Never put the
+  clone or a worktree in an iCloud-synced folder such as `~/Desktop`: git, Docker file sharing and
+  gitleaks fail there (`mmap failed`, `resource busy`). The installed app uses the clone it was built from.
 
 ## Repo map
 
@@ -42,11 +46,14 @@ the protocol's `backend/ frontend/ infra/` folders map onto existing directories
 - `container/`: the Kali image both modes run from (Lab: `kali-lab`, Bug bounty: `kali-bounty`).
 - `host/`: Mac-side CLIs: `host/lab` (Lab mode), `host/bounty` (Bug bounty mode).
 - `bounty/`: Python package (stdlib only) behind `host/bounty`: Intigriti client, program profiles,
-  ranking. Tested with `python3 -m unittest discover bounty`.
+  ranking, manual targets, guard control, recon, access-control check. Tested with
+  `python3 -m unittest discover bounty`.
 - `tutor/`: sandboxed Claude Code tutor for Lab mode. `hunter/`: Claude Code copilot for Bug bounty.
-- `tests/`: shell gate and fault-injection tests.
-- `docs/`: architecture, contracts, tasks, ADRs, `spike-notes.md` (history), `design.md` (UI).
-- `workspace/`: user data, gitignored (layout in CONTRACTS §1).
+- `scripts/`: `secrets.sh` (SOPS wrapper), `check-secrets.sh`, secret templates. `tools/`: dev utilities.
+- `tests/`: shell gate and fault-injection tests (Lab), `bounty-guard-test.sh` (scope guard end to end).
+- `docs/`: architecture, contracts, tasks, ADRs, `USER-GUIDE.md`, `SECRETS.md`, `spike-notes.md`
+  (history), `design.md` (UI).
+- `workspace/`: user data, gitignored (layout in CONTRACTS §1; volumes and tmpfs in ARCHITECTURE §3).
 
 ## Commit conventions
 
