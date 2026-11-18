@@ -41,6 +41,11 @@ const programs = {
   // Work surface (FE-8): shell `t` and Claude `h`, enabled only with a program in the guard
   "work-off": ["loaded", async (p) => { await p.keyboard.press("t"); }, "synced", "off"],
   "work-active": ["loaded", async (p) => { await p.keyboard.press("h"); }, "synced", "active"],
+  // Look here (FE-6)
+  "lookhere": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); }, "synced", "active"],
+  "lookhere-out": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); await p.keyboard.press("x"); await p.keyboard.press("G"); await p.keyboard.press("o"); }, "synced", "active"],
+  "lookhere-mapping": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); await p.waitForTimeout(200); await p.keyboard.press("m"); await p.waitForFunction(() => /Mapping 4\//.test(document.getElementById("lh-map-line")?.textContent ?? "")); }, "synced", "active", "&m=running"],
+  "lookhere-blocked": ["loaded", async (p) => { await p.click('tbody tr[data-handle]:not([data-handle="intigriti-dropbox"])'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); }, "synced", "active"],
 };
 const scenarios = only ?? [...lab, ...Object.keys(programs)];
 

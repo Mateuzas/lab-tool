@@ -229,11 +229,39 @@
         <div class="pg-empty" id="pg-empty" hidden></div>
       </div>
 
+      <section class="lh" id="lh" role="dialog" aria-labelledby="lh-title" hidden>
+        <header class="lh-head">
+          <h2 id="lh-title"></h2>
+          <span class="handle" id="lh-handle"></span>
+          <p class="lh-sum" id="lh-sum" role="status"></p>
+          <button type="button" class="pg-toggle" id="lh-out" aria-pressed="false" aria-keyshortcuts="x" hidden></button>
+          <button type="button" class="lh-map" id="lh-map" aria-keyshortcuts="m"></button>
+          <button type="button" class="lh-close" id="lh-close" aria-label="Close look here">Close <kbd>Esc</kbd></button>
+        </header>
+        <p class="lh-map-line" id="lh-map-line" role="status" hidden></p>
+        <div class="lh-open" id="lh-open" role="status" hidden>
+          <code id="lh-open-url"></code>
+          <button type="button" id="lh-copy" aria-keyshortcuts="y">Copy</button>
+          <span>Open in Burp's browser to test. The app's browser link would skip the scope guard.</span>
+        </div>
+        <div class="lh-table-wrap" id="lh-table-wrap" tabindex="-1">
+          <table class="lh-table" id="lh-table">
+            <thead><tr><th class="num" scope="col" title="Interest: new 0.35, live 0.15, 0.1 per signal">Interest</th><th scope="col">Host</th><th class="num" scope="col">Status</th><th scope="col">Title</th><th scope="col" class="wide">Tech</th><th class="num" scope="col" title="URLs found by the crawler">URLs</th><th scope="col">Signals</th></tr></thead>
+            <tbody id="lh-body"></tbody>
+          </table>
+          <div class="pg-empty" id="lh-empty" hidden></div>
+        </div>
+        <footer class="lh-foot">
+          <span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> show URL</span><span><kbd>y</kbd> copy</span>
+          <span><kbd>m</kbd> map hosts</span><span><kbd>x</kbd> out of scope</span><span><kbd>Esc</kbd> close</span>
+        </footer>
+      </section>
+
       <footer class="pg-foot">
         <p class="pg-keys" aria-label="Keyboard shortcuts">
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
-          <span><kbd>u</kbd> use program</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
+          <span><kbd>u</kbd> use program</span><span><kbd>l</kbd> look here</span><span><kbd>m</kbd> map</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
           <span><kbd>?</kbd> all keys</span>
         </p>
         <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
@@ -267,6 +295,8 @@
             <dl>
               <dt>Scope guard</dt><dd></dd>
               <dt><kbd>u</kbd></dt><dd>Use the selected program or manual target</dd>
+              <dt><kbd>l</kbd></dt><dd>Look here: the program's hosts, most interesting first</dd>
+              <dt><kbd>m</kbd></dt><dd>Map the active program through the guard (httpx + katana)</dd>
               <dt><kbd>t</kbd></dt><dd>Terminal shell in the guard container</dd>
               <dt><kbd>h</kbd></dt><dd>Claude copilot for the active program</dd>
               <dt><kbd>b</kbd></dt><dd>Open Burp through the guard</dd>
