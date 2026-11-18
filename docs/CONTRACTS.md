@@ -557,7 +557,8 @@ UI: on the Programs screen **`v`** opens the **Access check** panel for the guar
 footer key strip and as a button next to Shell/Claude/Burp). Header "Access check: <program>" with
 two session chips (A / B: header names, marker count, set time, or "not set"). `1`/`2` open a paste
 dialog for A/B (header lines; one marker field for A only; Save/Cancel; the textarea is cleared on
-save or cancel); Shift-`1`/`2` clears that session after a confirm. Candidates (last 24 h): `j/k`
+save or cancel); `c` clears a session after a confirm (`1`/`2` picks which when both are set;
+not Shift-`1`, which is `!` on most layouts). Candidates (last 24 h): `j/k`
 move, Space picks; a row whose method isn't safe shows "changes data" and needs `!` on it to be
 replayed (`--unsafe`); `Enter` replays the picked rows with a progress line. `Tab` switches to
 Results: CHECK (`likely-broken-access`) first, then `public`, then `none`, with "Confirm CHECK rows

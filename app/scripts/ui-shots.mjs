@@ -46,6 +46,16 @@ const programs = {
   "lookhere-out": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); await p.keyboard.press("x"); await p.keyboard.press("G"); await p.keyboard.press("o"); }, "synced", "active"],
   "lookhere-mapping": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); await p.waitForTimeout(200); await p.keyboard.press("m"); await p.waitForFunction(() => /Mapping 4\//.test(document.getElementById("lh-map-line")?.textContent ?? "")); }, "synced", "active", "&m=running"],
   "lookhere-blocked": ["loaded", async (p) => { await p.click('tbody tr[data-handle]:not([data-handle="intigriti-dropbox"])'); await p.keyboard.press("l"); await p.waitForSelector("#lh-body tr"); }, "synced", "active"],
+  // Access check (FE-9): 5th element = extra query (?ac=set | empty | running)
+  "access-results": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForSelector("#ac-cand-body tr"); await p.keyboard.press("Tab"); await p.waitForSelector("#ac-res-body tr"); }, "synced", "active"],
+  "access-picks": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForSelector("#ac-cand-body tr"); await p.waitForTimeout(150);
+    for (const k of ["Space", "j", "Space", "j", "Space", "!", "j", "j"]) await p.keyboard.press(k); }, "synced", "active"],
+  "access-running": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForSelector("#ac-cand-body tr"); await p.waitForTimeout(150);
+    for (const k of ["Space", "j", "Space", "j", "j", "Space", "Enter"]) await p.keyboard.press(k);
+    await p.waitForFunction(() => /Replaying 2\/3/.test(document.getElementById("ac-line")?.textContent ?? "")); }, "synced", "active", "&ac=running"],
+  "access-paste": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForSelector("#ac-cand-body tr"); await p.keyboard.press("1"); }, "synced", "active"],
+  "access-empty": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForFunction(() => /Set account A/.test(document.getElementById("ac-empty")?.textContent ?? "")); }, "synced", "active", "&ac=empty"],
+  "access-off": ["loaded", async (p) => { await p.keyboard.press("v"); await p.hover("#pg-access"); }, "synced", "off"],
 };
 const scenarios = only ?? [...lab, ...Object.keys(programs)];
 

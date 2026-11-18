@@ -886,3 +886,133 @@ tr.join .total .tbar {
 .lh-table .host .h:not(:nth-last-child(-n+2)) { max-width: calc(100% - 12em); }
 .lh-head .handle { white-space: nowrap; }
 @media (max-width: 1400px) { .lh-head .handle { display: none; } }
+
+/* ---- Access check (FE-9, CONTRACTS §13): the look-here drawer, one program's A/B replays.
+   The memorable thing is the answer triplet in Results (A | B | no session): B's verdict is the
+   only loud colour when it looks like A's, and CHECK is the one solid pill. ---- */
+.ac .lh-head { gap: 14px; }
+.ac-sessions { display: flex; gap: 8px; margin-left: auto; min-width: 0; }
+.programs .ac-chip {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 300px; height: 34px;
+  padding: 0 8px 0 4px; border-style: dashed; color: var(--ink-soft); background: var(--field);
+}
+.programs .ac-chip[data-set="true"] { border-style: solid; border-color: var(--go); color: var(--ink); }
+.ac-who {
+  flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 4px;
+  font-weight: 700; color: var(--ink-soft); background: var(--paper);
+}
+.ac-chip[data-set="true"] .ac-who { color: var(--cta-text); background: var(--go); }
+.ac-chip-body { display: flex; flex-direction: column; min-width: 0; line-height: 1.15; text-align: left; }
+.ac-names { font: 0.9em var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-meta { font-size: 0.82em; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ac-chip[data-set="false"] .ac-meta { font-size: 0.92em; }
+.ac-chip kbd { flex: none; margin-left: auto; }
+
+.ac-bar { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ac-bar .lh-sum { margin: 0 auto 0 0; }
+.ac-tabs { display: flex; gap: 18px; flex: none; border-bottom: 1px solid var(--hair); }
+.programs .ac-tabs button {
+  display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 2px; margin-bottom: -1px;
+  border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; color: var(--ink-soft);
+}
+.programs .ac-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--cta); }
+.programs .ac-tabs button:hover { color: var(--ink); }
+.ac-count { font: 0.85em var(--mono); color: var(--ink-soft); }
+.ac #ac-run { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.ac #ac-run[hidden] { display: none; }
+.lh-map-line[data-kind="confirm"] { border-left: 3px solid var(--wait); background: color-mix(in srgb, var(--wait) 8%, var(--field)); }
+.lh-map-line[data-kind="ok"] { color: var(--ink-soft); border-left: 3px solid var(--go); background: var(--field); }
+#ac-line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ac-table { table-layout: fixed; }
+.ac-table .ac-method { width: 72px; font: 700 0.88em var(--mono); color: var(--ink-soft); }
+.ac-table tr.unsafe .ac-method { color: var(--stop); }
+.ac-table thead th.ac-method { font: 400 0.92em var(--sans); }
+.ac-table .ac-url { font-family: var(--mono); font-size: 0.95em; }
+.ac-table .ac-url .u { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; color: var(--ink); }
+.ac-table tr.unsafe .ac-url .u { max-width: calc(100% - 10.5em); }
+.ac-table .ac-status { width: 64px; }
+.ac-table .ac-len { width: 84px; }
+.ac-table .ac-ts { width: 64px; color: var(--ink-soft); }
+.ac-table .ac-pick { width: 34px; padding-right: 0; }
+.ac-box {
+  display: inline-block; width: 14px; height: 14px; vertical-align: -2px; border: 1.5px solid var(--rule); border-radius: 3px;
+  background: var(--field);
+}
+.ac-table tr.picked .ac-box {
+  border-color: var(--cta);
+  background: var(--cta) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'%3E%3Cpath d='M3 7.2 5.8 10 11 4.4' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat;
+}
+.ac-table tbody tr.picked:not(.selected) { background: color-mix(in srgb, var(--cta) 5%, var(--field)); }
+.ac-unsafe {
+  margin-left: 8px; padding: 0 5px; border-radius: 4px; font: 700 0.8em / 1.6 var(--sans);
+  color: var(--stop); border: 1px solid color-mix(in srgb, var(--stop) 40%, var(--field));
+}
+.ac-unsafe.ok { color: var(--cta-text); background: var(--stop); border-color: var(--stop); }
+
+/* Results */
+.ac-table .ac-hint-cell { width: 76px; }
+.ac-table .ac-a { width: 52px; }
+.ac-table .ac-b { width: 196px; }
+.ac-table .ac-none { width: 150px; }
+.ac-table tbody tr.check td:first-child { box-shadow: inset 3px 0 0 var(--stop); }
+.ac-table tbody tr.check { background: color-mix(in srgb, var(--stop) 6%, var(--field)); }
+.ac-table tbody tr.check.selected { background: color-mix(in srgb, var(--cta) 12%, var(--field)); }
+.ac-hint { padding: 0 6px; border-radius: 4px; font: 700 0.8em / 1.6 var(--sans); white-space: nowrap; }
+.ac-hint-check { color: #fff; background: var(--stop); letter-spacing: 0.03em; }
+.ac-hint-public { color: var(--wait); border: 1px solid color-mix(in srgb, var(--wait) 45%, var(--field)); }
+.ac-tabs .ac-hint { font-size: 0.75em; }
+.ac-var { font-variant-numeric: tabular-nums; }
+.ac-var .st { display: inline-block; width: 3ch; font-family: var(--mono); text-align: right; }
+.ac-var .vd {
+  display: inline-block; min-width: 4.6em; margin-left: 8px; padding: 0 5px; border-radius: 4px;
+  font-size: 0.82em; line-height: 1.6; color: var(--ink-soft); border: 1px solid var(--hair);
+}
+.ac-var .vd.flag { color: var(--stop); font-weight: 700; border-color: color-mix(in srgb, var(--stop) 45%, var(--field)); background: color-mix(in srgb, var(--stop) 8%, var(--field)); }
+.ac-var .vd-blocked { color: var(--go); border-color: color-mix(in srgb, var(--go) 40%, var(--field)); }
+.ac-var .vd-refused, .ac-var .vd-error { border-style: dashed; }
+.ac-var .sim { margin-left: 8px; font: 0.88em var(--mono); color: var(--ink-soft); }
+.ac-note { margin: 0; color: var(--ink); padding: 5px 10px; border-left: 3px solid var(--stop); background: var(--field); border-radius: 4px; }
+.ac-note[hidden] { display: none; }
+
+/* Paste dialog: over the drawer, the session text lives only in its textarea. */
+.ac-paste {
+  position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; padding: 16px;
+  background: color-mix(in srgb, var(--ink) 30%, transparent);
+}
+.ac-paste[hidden] { display: none; }
+.ac-paste-card {
+  width: min(620px, 100%); display: flex; flex-direction: column; gap: 10px; padding: 16px 20px 18px;
+  border-radius: 8px; background: var(--field); border-top: 4px solid var(--cta);
+  box-shadow: 0 18px 50px color-mix(in srgb, var(--ink) 30%, transparent);
+}
+.ac-paste-card h3 { margin: 0; font-size: 1.15em; }
+.ac-paste-lead, .ac-paste-note { margin: 0; color: var(--ink-soft); }
+.ac-paste-note { font-size: 0.9em; }
+.ac-field { display: flex; flex-direction: column; gap: 4px; }
+.ac-field[hidden] { display: none; }
+.ac-field span { font-weight: 700; font-size: 0.92em; }
+.ac-field textarea, .ac-field input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; background: var(--field); color: var(--ink);
+  font: 0.95em / 1.4 var(--mono);
+}
+.ac-field input { height: 32px; padding-block: 0; }
+.ac-field textarea { resize: vertical; min-height: 110px; }
+.ac-paste-error { margin: 0; color: var(--stop); }
+.ac-paste-error[hidden] { display: none; }
+.ac-paste-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.ac-paste-actions button { display: inline-flex; align-items: center; gap: 8px; }
+.ac-paste-actions .primary kbd { background: transparent; color: inherit; border-color: color-mix(in srgb, currentColor 50%, transparent); }
+
+@media (max-width: 1000px) {
+  .ac .lh-head { flex-wrap: wrap; }
+  .ac-sessions { order: 3; flex: 1 1 100%; margin-left: 0; }
+  .programs .ac-chip { flex: 1 1 0; max-width: none; }
+  .ac .lh-close { margin-left: auto; }
+  .ac-table .ac-ts { display: none; }
+  .ac-table .ac-b { width: 168px; }
+  .ac-table .ac-none { width: 128px; }
+  .ac-table .ac-hint-cell { width: 66px; }
+  .ac-var .vd { min-width: 0; }
+  .ac-var .sim { margin-left: 4px; }
+}

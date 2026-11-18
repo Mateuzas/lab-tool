@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
  * The scope guard on the Programs screen (FE-4, docs/CONTRACTS.md §9.1): header indicator, use a
  * program (`u`), open Burp through the guard (`b`), stop it (`g`), and the last refusals.
  * FE-8 (§12.4): a shell in the guard container (`t`) and the Claude copilot (`h`), active program only.
+ * FE-9 (§13.4): the access check (`v`) has the same gate.
  */
 export type GuardStatus = {
   running: boolean;
@@ -93,7 +94,8 @@ export function setupGuard(opts: {
     $<HTMLButtonElement>("pg-burp").disabled = !!busy;
     // aria-disabled, not disabled: WebKit shows no tooltip on a disabled button, and the tooltip says why.
     const why = workBlocked();
-    for (const [id, label] of [["pg-shell", "Open a shell in the guard container"], ["pg-hunter", "Open the Claude copilot"]] as const) {
+    for (const [id, label] of [["pg-shell", "Open a shell in the guard container"], ["pg-hunter", "Open the Claude copilot"],
+      ["pg-access", "Access check: replay account A's requests as B and with no session"]] as const) {
       const b = $<HTMLButtonElement>(id);
       b.setAttribute("aria-disabled", String(!!why));
       b.title = why ?? label;
@@ -194,6 +196,14 @@ export function setupGuard(opts: {
     }
     draw();
   }
+  /** `v`: true when the access check can open, else says why on the guard line. */
+  function gate(what: string): boolean {
+    const why = workBlocked();
+    confirming = null;
+    if (why) { error = `Can't open ${what}: ${why}`; draw(); return false; }
+    if (error.startsWith("Can't open")) { error = ""; draw(); }
+    return true;
+  }
   const shell = () => work("bounty_open_shell", "the shell");
   const hunter = () => work("bounty_open_hunter", "the Claude copilot");
 
@@ -214,7 +224,7 @@ export function setupGuard(opts: {
   draw();
   return {
     active,
-    use, stop, burp, shell, hunter, toggleRefusals,
+    use, stop, burp, shell, hunter, toggleRefusals, gate,
     /** Esc: close the popover or cancel a pending switch. True when it did something. */
     escape() {
       if (confirming) { confirming = null; draw(); return true; }
