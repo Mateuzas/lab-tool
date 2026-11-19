@@ -22,8 +22,10 @@ workspace/
       program.json                 normalised profile (§2)
       history.jsonl                one line per change found by `programs changes` (§6)
       notes.md                     free text, the user's
-      findings/<id>/finding.md     a finding (§7), with evidence files beside it
-      time.jsonl                   hours spent: {"start","end","note"} (feeds ranking feedback)
+      time.jsonl                   hours spent: {"start","end","note"} (§14)
+    findings/<handle>-<slug>/     a finding (§7): finding.md + evidence/ (outside programs/, which
+                                   holds the profiles that define scope and that the copilot may not write)
+    time-open.json               the running timer, if any (§14)
     work/<handle>/               the ONLY folder kali-bounty can write to (tool output, scratch)
       recon/                       one file per run: <tool>-<UTC timestamp>.<ext>
 ```
@@ -224,12 +226,13 @@ looked up once per guard start via a `recon-source` and logged on every line.
 | `programs rank [...]` | §4 | 0 |
 | `programs changes [--since TS]` | diff of the last two syncs, appended to each `history.jsonl` | 0, 1 if nothing changed |
 | `program use H` | write `active`, `docker exec … bounty-ctl reload` | 0, 5 if the container is not running |
-| `program show [H]` | profile, scope, rules, legal basis | 0 |
+| `program show [H] [--json]` | profile, scope, rules, legal basis, application, recon/findings/time summary; H defaults to the guard's active program | 0, 64 |
 | `guard start` / `guard stop [--purge]` | start `kali-bounty` (stops `kali-lab`) / remove it (`--purge` also the guard volume) | 0, 5 Docker not running |
 | `guard status [--json]` | `guard.json` via docker exec | 0, 5 |
 | `flows [--handle H] [--tail N] [--json]` | the flow log via docker exec | 0, 5 |
 | `flows export <handle> <dir>` | copy that program's flows (jsonl + mitm) to a Mac folder for report evidence | 0, 5 |
-| `time start|stop [note]` | append to `time.jsonl` | 0 |
+| `time start [note] [--handle H]` / `time stop` / `time status` / `time report [--since DAYS] [--json]` | §14 | 0, 64 |
+| `finding new <slug> [--title T] [--handle H]` / `finding list [--handle H] [--json]` / `finding evidence <id> FLOW_ID…` | §7 | 0; evidence 3 guard not running, 64 |
 
 Errors go to stderr as one line `bounty: <code>: <message>`, never containing a token. Usage errors
 (bad flags, unknown `--handle`) exit 64. A failed detail request is recorded in the sync index; the
@@ -245,7 +248,29 @@ decides, documents it in the PR). With `--actor claude` and `automation: forbidd
 
 ## 7. Finding: `findings/<id>/finding.md` (draft)
 
-`<id>` = `F<YYYYMMDD>-<n>`. YAML front matter: `title, severity, cvss, asset, status (draft|submitted|accepted|duplicate|informative|na), flows: [flow_id…], ai_used: bool`. Body sections: Summary, Steps to reproduce, Impact, Evidence, AI usage.
+`<id>` = `<handle>-<slug>` (slug `[a-z0-9-]{1,60}`), e.g. `intigriti-acme-idor-shared-folder`. The
+user and the copilot write here (hunter/ may write `findings/**`, never `programs/**`).
+`host/bounty finding new <slug>` creates it from the template; it refuses an existing id.
+
+Front matter (a flat YAML subset: `key: value`, inline lists `[a, b]`, `null`, `true/false`,
+numbers, strings):
+`program, title, severity (tbd|none|low|medium|high|critical), cvss, asset, status
+(draft|submitted|accepted|duplicate|informative|na|resolved), flows: [flow_id…], ai_used: bool,
+created, submitted, payout_eur`. Body sections: Summary, Steps to reproduce, Impact, Evidence,
+Suggested fix, AI usage. `payout_eur` is filled by hand when paid (it feeds §14's €/h).
+
+`finding list [--handle H] [--json]`: one row per finding `{id, program, title, severity, status,
+flows, created, payout_eur}`, newest first.
+
+`finding evidence <id> FLOW_ID…` copies flows of the finding's program out of the guard's `.mitm`
+into `findings/<id>/evidence/<flow_id>.txt` (request line, headers, body; response status, headers,
+body) and adds the ids to `flows`. Read by `bounty-evidence` (root, `docker exec`; no traffic).
+**Redacted:** values of `Cookie`/`Set-Cookie` (cookie names kept: `sid=<redacted>`),
+`Authorization`, `Proxy-Authorization` and any header whose name contains token, secret, session,
+auth, csrf, key or password; token-like URL query values (`***`); in JSON and form bodies, the values
+of secret-looking fields (password, pass, token, secret, otp, api key, session, refresh, pin, code…).
+Other body content is kept up to 20 KB (binary as `[n bytes]`) and is **not** redacted: each file
+starts with a line saying so. Review evidence before submitting.
 
 ## 8. Secrets (ADR 006)
 
@@ -581,3 +606,16 @@ replayed (`--unsafe`); `Enter` replays the picked rows with a progress line. `Ta
 Results: CHECK (`likely-broken-access`) first, then `public`, then `none`, with "Confirm CHECK rows
 by hand in Burp before reporting." `r` reloads; `Esc` closes. The panel reloads on
 `bounty-ac-updated`.
+
+## 14. Time and €/h (BE-25)
+
+The strategy (2026-11-14) is to measure euros per hour per program and approach.
+`time start [note] [--handle H]` opens a timer for H (default: the guard's active program; exit 64
+when there's neither) in `workspace/bounty/time-open.json` `{"handle","start","note"}`; starting
+while one runs stops that one first. `time stop` appends `{"start","end","note"}` to
+`programs/<h>/time.jsonl`. `time status` shows the running timer and today's total.
+`time report [--since DAYS (30)] [--json]`: per program `{handle, name, hours, sessions,
+findings: {status: n}, payout_eur, eur_per_hour}` (payouts from the findings' `payout_eur`; null
+€/h when there's no time), sorted by €/h then hours. Times are UTC; a session that spans the
+`--since` cut counts only its part inside the window.
+

@@ -1,0 +1,170 @@
+#!/usr/bin/python3 -I
+"""bounty-evidence --handle H --ids ID,...   (CONTRACTS §7; root via `docker exec`, by
+`host/bounty finding evidence`). Reads flows out of the guard's .mitm files and prints JSON
+[{"flow_id", "text"}] with credentials redacted. Sends nothing anywhere.
+
+Redacted: Cookie / Set-Cookie values (names kept), Authorization, Proxy-Authorization and any header
+whose name contains token, secret, session, auth, csrf, key or password; token-like URL query values.
+Bodies are kept (≤ 20 KB, binary summarised); in JSON and form bodies the values of secret-looking
+fields (password, token, secret, otp, api key, session…) are redacted, everything else is kept.
+Every text says so on its first line.
+Exit: 0; 64 usage / unknown id; 70 internal.
+"""
+
+import argparse
+import urllib.parse
+import datetime
+import glob
+import json
+import os
+import re
+import sys
+
+SHARE = os.environ.get("BOUNTY_SHARE", "/usr/local/share/bounty")
+sys.path.insert(0, SHARE)
+import ac_core  # noqa: E402  (redact_url)
+import guard_policy as gp  # noqa: E402
+
+FLOWS = "/var/lib/bounty-guard/flows"
+MAX_BODY = 20 * 1024
+SECRET_HEADER = re.compile(r"(token|secret|session|auth|csrf|xsrf|key|password|cookie)", re.I)
+FLOW_ID = re.compile(r"^[0-9a-f-]{8,64}$")
+SECRET_FIELD = re.compile(r"(pass(word|wd)?|secret|token|otp|mfa|totp|api[_-]?key|apikey|session|cookie|"
+                          r"auth|credential|private[_-]?key|refresh|pin)$|^(pass(word)?|pin|code)$", re.I)
+NOTE = ("# kali-lab evidence: credentials in headers, URL and secret-looking JSON/form fields are "
+        "redacted; OTHER BODY CONTENT IS NOT. Review before submitting.\n")
+
+
+def _redact_json(v):
+    if isinstance(v, dict):
+        return {k: ("<redacted>" if isinstance(k, str) and SECRET_FIELD.search(k) and not isinstance(val, (dict, list))
+                    else _redact_json(val)) for k, val in v.items()}
+    if isinstance(v, list):
+        return [_redact_json(x) for x in v]
+    return v
+
+
+def redact_body(text, content_type):
+    """Secret-looking fields of a JSON or form body -> <redacted>; anything else unchanged."""
+    ct = (content_type or "").lower()
+    stripped = text.strip()
+    if "json" in ct or stripped[:1] in ("{", "["):
+        try:
+            return json.dumps(_redact_json(json.loads(text)), ensure_ascii=False, indent=1)
+        except ValueError:
+            return text
+    if "x-www-form-urlencoded" in ct:
+        pairs = urllib.parse.parse_qsl(text, keep_blank_values=True)
+        if pairs:
+            return urllib.parse.urlencode([(k, "<redacted>" if SECRET_FIELD.search(k) else v) for k, v in pairs], safe="<>")
+    return text
+
+
+def log(line):
+    sys.stderr.write("bounty: " + line + "\n")
+
+
+def redact_header(name, value):
+    n = name.lower()
+    if n in ("cookie", "set-cookie"):
+        parts = []
+        for i, part in enumerate(value.split(";")):
+            if "=" in part:
+                k, _ = part.split("=", 1)
+                # Set-Cookie attributes after the first pair (Path, Domain…) are not secrets
+                if n == "set-cookie" and i > 0:
+                    parts.append(part.strip())
+                else:
+                    parts.append("%s=<redacted>" % k.strip())
+            elif part.strip():
+                parts.append(part.strip())
+        return "; ".join(parts)
+    if SECRET_HEADER.search(n):
+        return "<redacted>"
+    return value
+
+
+def body_text(msg):
+    if msg is None:
+        return ""
+    t = _body_text(msg)
+    return redact_body(t, msg.headers.get("content-type")) if t and not t.startswith("[") else t
+
+
+def _body_text(msg):
+    if msg is None:
+        return ""
+    try:
+        raw = msg.get_content(strict=False) or b""
+    except Exception:
+        raw = msg.raw_content or b""
+    if not raw:
+        return ""
+    head = raw[:MAX_BODY]
+    try:
+        t = head.decode("utf-8")
+    except UnicodeDecodeError:
+        return "[%d bytes, binary]" % len(raw)
+    if len(raw) > MAX_BODY:
+        t += "\n[… %d more bytes not shown]" % (len(raw) - MAX_BODY)
+    return t
+
+
+def render(fl):
+    req, resp = fl.request, fl.response
+    lines = [NOTE]
+    ts = datetime.datetime.fromtimestamp(req.timestamp_start or 0, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    lines.append("# flow %s, %s\n\n" % (fl.id, ts))
+    lines.append("%s %s %s\n" % (req.method, ac_core.redact_url(req.pretty_url), req.http_version))
+    for k, v in req.headers.items(multi=True):
+        lines.append("%s: %s\n" % (k, redact_header(k, v)))
+    b = body_text(req)
+    lines.append("\n" + b + ("\n" if b else ""))
+    if resp is None:
+        lines.append("\n# no response recorded\n")
+        return "".join(lines)
+    lines.append("\n# response\n%s %s %s\n" % (resp.http_version, resp.status_code, resp.reason or ""))
+    for k, v in resp.headers.items(multi=True):
+        lines.append("%s: %s\n" % (k, redact_header(k, v)))
+    b = body_text(resp)
+    lines.append("\n" + b + ("\n" if b else ""))
+    return "".join(lines)
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="bounty-evidence")
+    p.add_argument("--handle", required=True)
+    p.add_argument("--ids", required=True)
+    a = p.parse_args(argv)
+    if os.geteuid() != 0:
+        log("usage: run bounty-evidence as root via docker exec")
+        return 64
+    ids = [i for i in a.ids.split(",") if i]
+    if not gp.HANDLE_RE.match(a.handle) or not ids or not all(FLOW_ID.match(i) for i in ids):
+        log("usage: bad handle or flow ids")
+        return 64
+    try:
+        from mitmproxy import io as mio
+        from mitmproxy.exceptions import FlowReadException
+        found = {}
+        for path in sorted(glob.glob(os.path.join(FLOWS, a.handle, "*.mitm"))):
+            with open(path, "rb") as f:
+                try:
+                    for fl in mio.FlowReader(f).stream():
+                        if getattr(fl, "id", None) in ids:
+                            found[fl.id] = fl
+                except FlowReadException:
+                    pass
+        missing = [i for i in ids if i not in found]
+        if missing:
+            log("usage: unknown flow id(s) for %s: %s" % (a.handle, ", ".join(missing)))
+            return 64
+        print(json.dumps([{"flow_id": i, "text": render(found[i])} for i in ids]))
+        return 0
+    except Exception as e:  # never dump flow objects (they hold credentials)
+        log("internal: %s" % type(e).__name__)
+        return 70
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

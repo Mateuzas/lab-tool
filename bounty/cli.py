@@ -7,6 +7,9 @@ import sys
 
 from bounty import ac as ac_mod
 from bounty import applications
+from bounty import findings as findings_mod
+from bounty import show as show_mod
+from bounty import timelog as time_mod
 from bounty import changes as changes_mod
 from bounty import guard as guard_mod
 from bounty import manual as manual_mod
@@ -77,6 +80,9 @@ def build_parser():
     u = prs.add_parser("use", help="make a program the guard's active profile "
                                    "(run via scripts/secrets.sh exec intigriti -- for INTIGRITI_USERNAME)")
     u.add_argument("handle")
+    psh = prs.add_parser("show", help="one program at a glance: scope, rules, legal basis, recon, findings, time")
+    psh.add_argument("handle", nargs="?", help="default: the guard's active program")
+    psh.add_argument("--json", action="store_true")
     ap = prs.add_parser("apply-state", help="record where your application to a private program stands")
     ap.add_argument("handle")
     ap.add_argument("state", help="applied | accepted | rejected | withdrawn | none (clear)")
@@ -108,6 +114,30 @@ def build_parser():
     rl = rcs.add_parser("list", help="hosts ranked by interest")
     rl.add_argument("handle")
     rl.add_argument("--json", action="store_true")
+
+    tm = sub.add_parser("time", help="time spent per program and €/h (CONTRACTS §14)")
+    tms = tm.add_subparsers(dest="cmd")
+    ts_ = tms.add_parser("start", help="start a timer (default: the guard's active program)")
+    ts_.add_argument("note", nargs="?", help="what you're doing, e.g. 'access control on sharing'")
+    ts_.add_argument("--handle")
+    tms.add_parser("stop", help="stop the running timer")
+    tms.add_parser("status", help="the running timer and today's total")
+    tr = tms.add_parser("report", help="hours, findings, payouts and €/h per program")
+    tr.add_argument("--since", type=float, default=30.0, metavar="DAYS")
+    tr.add_argument("--json", action="store_true")
+
+    fd = sub.add_parser("finding", help="finding drafts (CONTRACTS §7)")
+    fds = fd.add_subparsers(dest="cmd")
+    fn = fds.add_parser("new", help="create findings/<handle>-<slug>/finding.md from the template")
+    fn.add_argument("slug", help="short id, e.g. idor-shared-folder")
+    fn.add_argument("--title")
+    fn.add_argument("--handle", help="default: the guard's active program")
+    fl_ = fds.add_parser("list", help="findings, newest first")
+    fl_.add_argument("--handle")
+    fl_.add_argument("--json", action="store_true")
+    fe = fds.add_parser("evidence", help="copy flows (credentials redacted) into the finding's evidence/")
+    fe.add_argument("id", help="the finding's folder name (finding list)")
+    fe.add_argument("flow_ids", nargs="+", metavar="FLOW_ID")
 
     acp = sub.add_parser("ac", help="two-account access-control check, on demand (CONTRACTS §13)")
     acs = acp.add_subparsers(dest="cmd")
@@ -323,6 +353,14 @@ def main(argv=None):
         ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit),
         ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
         ("recon", "exposures"): lambda a, w: recon_mod.exposures_cmd(w, a.limit),
+        ("program", "show"): lambda a, w: show_mod.show(w, a.handle, a.json),
+        ("time", "start"): lambda a, w: time_mod.start(w, a.note, a.handle),
+        ("time", "stop"): lambda a, w: time_mod.stop(w),
+        ("time", "status"): lambda a, w: time_mod.status(w),
+        ("time", "report"): lambda a, w: time_mod.report(w, a.since, a.json),
+        ("finding", "new"): lambda a, w: findings_mod.new(w, a.slug, a.title, a.handle),
+        ("finding", "list"): lambda a, w: findings_mod.list_cmd(w, a.handle, a.json),
+        ("finding", "evidence"): lambda a, w: findings_mod.evidence(w, a.id, a.flow_ids),
         ("ac", "session"): lambda a, w: ac_mod.session(w, a.who, a.marker, a.clear),
         ("ac", "status"): lambda a, w: ac_mod.status(w, a.json),
         ("ac", "candidates"): lambda a, w: ac_mod.candidates(w, a.since, a.limit, a.json),
