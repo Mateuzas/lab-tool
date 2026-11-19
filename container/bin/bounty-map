@@ -38,6 +38,8 @@ DEPTH = 2
 MAX_URLS = 300
 CRAWL_TIME = "5m"
 HTTPX_TIMEOUT = 120
+# Per request, above the guard's rate-limit queue (up to 10 s), so queued requests aren't lost.
+TOOL_TIMEOUT = 30
 _children = []
 
 
@@ -145,7 +147,7 @@ def run_lines(cmd, limit=None, timeout=None):
 def probe(host, rl):
     """httpx on one host -> list of live records (status None + refused=<reason> for refusals)."""
     cmd = ["httpx-toolkit", "-u", host, "-j", "-irh", "-sc", "-title", "-td", "-cl", "-location",
-           "-fhr", "-silent", "-nc", "-duc", "-rl", str(rl), "-t", "1", "-timeout", "10",
+           "-fhr", "-silent", "-nc", "-duc", "-rl", str(rl), "-t", "1", "-timeout", str(TOOL_TIMEOUT),
            "-retries", "0", "-H", "X-Bounty-Actor: tool:httpx-toolkit", "-http-proxy", PROXY]
     out = []
     for line in run_lines(cmd, timeout=HTTPX_TIMEOUT):
@@ -170,7 +172,7 @@ def probe(host, rl):
 def crawl(host, start, rl):
     """katana from `start`, same host only -> URL records (at most MAX_URLS)."""
     cmd = ["katana", "-u", start, "-d", str(DEPTH), "-jc", "-fs", "fqdn", "-rl", str(rl), "-c", "2",
-           "-p", "1", "-j", "-or", "-ob", "-silent", "-nc", "-duc", "-timeout", "10", "-ct", CRAWL_TIME,
+           "-p", "1", "-j", "-or", "-ob", "-silent", "-nc", "-duc", "-timeout", str(TOOL_TIMEOUT), "-ct", CRAWL_TIME,
            "-H", "X-Bounty-Actor: tool:katana", "-proxy", PROXY]
     seen, out = set(), []
     for line in run_lines(cmd, limit=MAX_URLS * 3):
