@@ -73,7 +73,7 @@ docker run --rm --network none -v "$WS/testca":/w "$IMAGE" sh -c '
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=guard-test CA" -keyout ca.key -out ca.pem \
     -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign" 2>/dev/null
   openssl req -newkey rsa:2048 -nodes -subj "/CN=app.acme.test" -keyout leaf.key -out leaf.csr 2>/dev/null
-  printf "basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\nsubjectAltName=DNS:app.acme.test,DNS:deep.app.acme.test,DNS:acme.test,DNS:community.acme.test,DNS:legacy.acme.test,DNS:other.test,DNS:whoami.recon.test,DNS:intranet.acme.test,DNS:meta.acme.test,IP:10.99.0.10,IP:203.0.113.10\n" > ext
+  printf "basicConstraints=CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\nsubjectAltName=DNS:app.acme.test,DNS:deep.app.acme.test,DNS:acme.test,DNS:community.acme.test,DNS:legacy.acme.test,DNS:other.test,DNS:unrelated.test,DNS:whoami.recon.test,DNS:intranet.acme.test,DNS:meta.acme.test,IP:10.99.0.10,IP:203.0.113.10\n" > ext
   openssl x509 -req -in leaf.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 2 -extfile ext -out leaf.pem 2>/dev/null
   chmod 644 *' || { echo "test CA failed"; exit 1; }
 
@@ -512,6 +512,32 @@ n=$(echo "$new" | python3 -c 'import json,sys; rs=[json.loads(l) for l in sys.st
 expect "$n" "True" "every exposure request in the flow log as tool:nuclei"
 got=$(host/bounty recon list test-acme --json | jget '[(r["exposures"], "exposed" in r["signals"]) for r in d if r["host"]=="app.acme.test"]')
 expect "$got" "[(['kl-env-file', 'kl-git-config'], True)]" "recon list shows the exposures"
+
+echo "== (s) browse-only hosts you approve (CONTRACTS §3.5)"
+use test-acme
+expect "$(req human https://unrelated.test/brw-0)" "403 not-in-scope" "before approval: a host outside the scope is refused"
+host/bounty program browse allow community.acme.test --handle test-acme >/dev/null 2>&1; rc=$?
+expect "$rc" 64 "an out-of-scope host can't be approved"
+host/bounty program browse allow unrelated.test --handle test-acme >/dev/null 2>&1; rc=$?
+expect "$rc" 0 "program browse allow"
+for _ in $(seq 1 30); do got=$(req human https://unrelated.test/brw-1); [ "$got" = "200 " ] && break; sleep 0.5; done
+expect "$got" "200 " "approved host reachable for your own GET (autoreload picked browse.json up)"
+expect "$(req human -X POST -d x=1 https://unrelated.test/brw-2)" "403 browse-read-only" "POST refused: read methods only"
+expect "$(req claude https://unrelated.test/brw-3)" "403 browse-human-only" "Claude refused on a browse-only host"
+docker exec "$C" bounty-run --actor human -- katana -silent -duc -d 1 -u https://unrelated.test/brw-4 >/dev/null 2>&1
+sleep 1
+line=$(flows test-acme | grep '/brw-4' | head -1)
+expect "$(echo "$line" | jget '(d["actor"], d["decision"], d["reason"])')" "('tool:katana', 'refused', 'browse-human-only')" "tools refused on a browse-only host"
+line=$(flows test-acme | grep '/brw-1' | tail -1)   # the polling loop's earlier tries were refused
+expect "$(echo "$line" | jget '(d["decision"], d["category"])')" "('allowed', 'browse')" "browse traffic logged as category browse"
+got=$(body human https://unrelated.test/brw-5 | jget 'd["headers"].get("X-Intigriti-Username")')
+expect "$got" "None" "no program identification headers sent to a browse-only host"
+host/bounty program browse allow unrelated.test --any-method --handle test-acme >/dev/null 2>&1
+for _ in $(seq 1 30); do got=$(req human -X POST -d x=1 https://unrelated.test/brw-6); [ "$got" = "200 " ] && break; sleep 0.5; done
+expect "$got" "200 " "--any-method allows POST"
+host/bounty program browse remove unrelated.test --handle test-acme >/dev/null 2>&1
+for _ in $(seq 1 30); do got=$(req human https://unrelated.test/brw-7); [ "$got" = "403 not-in-scope" ] && break; sleep 0.5; done
+expect "$got" "403 not-in-scope" "removed: refused again"
 
 echo "== (l) rate_limit_rps 0: only human traffic"
 use test-acme-norate

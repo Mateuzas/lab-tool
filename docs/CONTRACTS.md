@@ -164,6 +164,22 @@ Reason codes: `no-profile`, `host-mismatch`, `out-of-scope`, `not-in-scope`, `in
 ### 3.4 `recon-sources.json`
 `{"hosts": ["crt.sh", "web.archive.org", ...], "rate_limit_rps": 2}`. Exact hosts only, no wildcards.
 
+### 3.5 Browse-only hosts (BE-27)
+User decision 2026-11-19: a program's own site often needs hosts that aren't in scope (its CDN,
+its login provider). You approve them one by one; nothing passes until you do.
+`programs/<h>/browse.json` `{"hosts": {host: {"methods": "read"|"any", "approved_at"}}}`, written
+only on the Mac (`host/bounty program browse allow|remove HOST… [--any-method]`; the copilot can't
+write `programs/`). `program browse [--json]` lists approved hosts and **candidates**: hosts your own
+traffic (actor human) hit and the guard refused as not-in-scope, with count, methods and last time.
+`bounty-ctl reload` adds the file to the snapshot as `profile.browse`, and the reload fingerprint
+covers it, so an approval or removal applies within ~3 s.
+Policy: a not-in-scope host that is approved passes as category **`browse`** only when the actor is
+`human` and the method is GET/HEAD/OPTIONS (any method when approved with `--any-method`); otherwise
+`browse-human-only` / `browse-read-only`. Out-of-scope hosts can't be approved and are never
+browse; internal addresses are still refused; no program identification headers are added; its own
+rate bucket (20 req/s) so a page's assets don't use the program's rate. Logged like everything else
+(`category: browse`). Hostnames only: no wildcards, no IPs.
+
 ## 4. Ranking (ADR 007)
 
 `host/bounty programs rank [--json] [--top N] [--explain <handle>] [--include-no-bounty] [--include-join]`

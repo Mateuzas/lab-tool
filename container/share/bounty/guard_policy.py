@@ -19,6 +19,9 @@ REASONS = ("no-profile", "host-mismatch", "out-of-scope", "not-in-scope", "inter
 
 DEFAULT_RPS = 2.0          # rules.rate_limit_rps == null (CONTRACTS §3.1 step 6)
 MAX_WAIT_S = 10.0          # wait up to 10 s for a token, then rate-limited
+BROWSE_RPS = 20.0          # approved browse-only hosts (CDNs, login): their own, looser bucket
+READ_METHODS = ("GET", "HEAD", "OPTIONS")
+_HOSTNAME = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$")
 DEFAULT_RECON_RPS = 2.0
 MISSING_UA = "kali-lab"
 ACTOR_HEADER = "X-Bounty-Actor"
@@ -475,6 +478,7 @@ class Policy(object):
         self.recon = compile_recon(recon)
         self.listed_networks = [e.network for e in self.scope_in if e.kind == "cidr"]
         self.out_networks = [e.network for e in self.scope_out if e.kind == "cidr"]
+        self.browse = compile_browse(profile.get("browse"))
 
     # -- host level (CONNECT, server connect) -------------------------------------------
     def host_decision(self, host):
@@ -490,6 +494,8 @@ class Policy(object):
         for e in self.scope_in:
             if entry_matches_host(e, h, False):
                 return None, "target"
+        if h in self.browse:
+            return None, "browse"
         return "not-in-scope", "target"
 
     # -- request level (steps 2-4) -------------------------------------------------------
@@ -530,13 +536,46 @@ class Policy(object):
             return "automation-forbidden"
         return None
 
+    def browse_decision(self, host, method, actor):
+        """CONTRACTS §3.5: None when an approved browse-only host may be used by this request.
+        Only the human actor, only hosts the program doesn't put out of scope, and only read
+        methods unless the host was approved for any method."""
+        h = norm_host(host)
+        mode = self.browse.get(h)
+        if mode is None:
+            return "not-in-scope"
+        for e in self.scope_out:
+            if entry_matches_host(e, h, True):
+                return "out-of-scope"
+        if actor != "human":
+            return "browse-human-only"
+        if mode != "any" and (method or "").upper() not in READ_METHODS:
+            return "browse-read-only"
+        return None
+
     def describe(self):
         return {"program": self.handle, "rate_limit_rps": self.rules_rps, "effective_rps": self.rps,
+                "browse_hosts": len(self.browse),
                 "automation": "allowed" if self.automation else "forbidden",
                 "ai_use_forbidden": self.ai_forbidden, "identification": self.ident.describe(),
                 "scope_in": len(self.scope_in), "scope_out": len(self.scope_out),
                 "listed_networks": [str(n) for n in self.listed_networks],
                 "recon_sources": len(self.recon["hosts"])}
+
+
+def compile_browse(raw):
+    """{"hosts": {host: {"methods": "read"|"any"}}} -> {host: "read"|"any"}; anything malformed is
+    dropped (never widens: an unreadable entry just isn't approved)."""
+    out = {}
+    hosts = (raw or {}).get("hosts") if isinstance(raw, dict) else None
+    if not isinstance(hosts, dict):
+        return out
+    for h, v in hosts.items():
+        h = norm_host(h) if isinstance(h, str) else ""
+        if not _HOSTNAME.match(h) or is_ip_literal(h):
+            continue
+        out[h] = "any" if isinstance(v, dict) and v.get("methods") == "any" else "read"
+    return out
 
 
 # ---------------------------------------------------------------- host agreement and actors
@@ -582,15 +621,19 @@ class Decision(object):
         return "Decision(%s, %s, %s)" % ("allowed" if self.allowed else "refused", self.reason, self.category)
 
 
-def decide(policy, authority, sni, host_header, tls, scheme, port, path, actor, ips=None):
+def decide(policy, authority, sni, host_header, tls, scheme, port, path, actor, ips=None, method=None):
     """Steps 0-6a of CONTRACTS §3.1 (everything except waiting for a rate-limit token).
-    ips: resolved addresses of the host (None = not resolved, skip step 5)."""
+    ips: resolved addresses of the host (None = not resolved, skip step 5). A host that is not in
+    scope may still pass as an approved browse-only host (§3.5: human, read methods by default)."""
     host = host_mismatch(authority, sni, host_header, tls)
     if host is None:
         return Decision(False, "host-mismatch", "target", norm_host(authority))
     if policy is None:
         return Decision(False, "no-profile", "target", host)
     reason, category = policy.scope_decision(host, scheme, port, path)
+    if reason == "not-in-scope" and host in policy.browse:
+        reason = policy.browse_decision(host, method, actor)
+        category = "browse"
     if reason:
         return Decision(False, reason, category, host)
     if ips is not None:
@@ -613,6 +656,8 @@ def refusal_body(reason, detail=""):
         "internal-address": "host resolves to an internal address the profile does not list",
         "rate-limited": "rate limit: no token within 10 s",
         "automation-forbidden": "the program does not allow automated tools or Claude",
+        "browse-human-only": "this host is approved for your own browsing only, not for tools or Claude",
+        "browse-read-only": "this host is approved for browsing (GET/HEAD/OPTIONS) only",
     }.get(reason, reason)
     return "bounty-guard refused: %s%s\n" % (text, (" (" + detail + ")") if detail else "")
 

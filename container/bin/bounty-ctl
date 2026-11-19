@@ -235,6 +235,27 @@ def _read_profile(path):
     return raw, hashlib.sha256(raw).hexdigest()
 
 
+def _browse(handle):
+    """programs/<h>/browse.json (approved browse-only hosts, CONTRACTS §3.5): (raw bytes, dict).
+    Missing or unreadable -> (b"", {}): nothing approved, never an error."""
+    try:
+        with open(os.path.join(ROOT, "programs", handle, "browse.json"), "rb") as f:
+            raw = f.read()
+        d = json.loads(raw.decode("utf-8"))
+        return raw, (d if isinstance(d, dict) else {})
+    except (OSError, ValueError):
+        return b"", {}
+
+
+def _profile_sha(handle):
+    """Fingerprint of everything the guard enforces for a program: program.json + browse.json."""
+    raw, sha = _read_profile(os.path.join(ROOT, "programs", handle, "program.json"))
+    if raw is None:
+        return None
+    braw, _ = _browse(handle)
+    return sha if not braw else hashlib.sha256(raw + b"\0browse\0" + braw).hexdigest()
+
+
 def reload_profile(trigger, username, recon, error=None):
     """Validate the active program and hand it to the guard. Fails closed: on any error the guard
     gets an error snapshot and refuses everything. Returns (exit code, message)."""
@@ -266,7 +287,8 @@ def reload_profile(trigger, username, recon, error=None):
         return publish({"handle": None, "error": "/bounty/active holds an invalid handle"}, [], 4,
                        "/bounty/active holds an invalid handle", {})
     path = os.path.join(ROOT, "programs", handle, "program.json")
-    raw, sha = _read_profile(path)
+    raw, _ = _read_profile(path)
+    sha = _profile_sha(handle)
     base = {"handle": handle, "sha256": sha, "recon": recon,
             "username": username}   # kept so an automatic reload can refill templates
     if raw is None:
@@ -277,6 +299,8 @@ def reload_profile(trigger, username, recon, error=None):
     except ValueError as e:
         msg = "%s is not valid JSON: %s" % (path, e)
         return publish(dict(base, error=msg), [], 4, msg, {"sha256": sha})
+    if isinstance(profile, dict):
+        profile["browse"] = _browse(handle)[1]   # approved browse-only hosts ride in the snapshot
     sv, rv = _versions(profile)
     new = {"scope_version": sv, "rules_version": rv, "sha256": sha}
     base.update({"scope_version": sv, "rules_version": rv})
@@ -347,7 +371,7 @@ def cmd_autoreload(_args):
     handle = snap.get("handle")
     if not handle or not gp.HANDLE_RE.match(handle) or "sha256" not in snap:
         return 0
-    _, sha = _read_profile(os.path.join(ROOT, "programs", handle, "program.json"))
+    sha = _profile_sha(handle)
     if sha == snap.get("sha256"):
         return 0
     try:
@@ -357,6 +381,7 @@ def cmd_autoreload(_args):
     except OSError:
         return 0
     reload_profile("program.json changed", snap.get("username"), snap.get("recon") or {"hosts": []})
+    # (the trigger also covers browse.json: approving a browse-only host reloads the same way)
     return 0   # result is in the reload history (guard.json `reloads`, guard-events.log)
 
 

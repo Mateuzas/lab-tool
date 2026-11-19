@@ -58,6 +58,58 @@ def decide(policy, host, path="/", actor="human", scheme="https", port=443, sni=
                      actor, ips)
 
 
+class Browse(unittest.TestCase):
+    """CONTRACTS §3.5: approved browse-only hosts."""
+
+    def setUp(self):
+        p = profile()
+        p["browse"] = {"hosts": {"cdn.acmestatic.com": {"methods": "read"}, "login.idp.test": {"methods": "any"},
+                                 "community.acme.com": {"methods": "any"},     # out of scope: never usable
+                                 "10.0.0.1": {}, "*.wild.test": {}, "bad host": {}}}
+        self.p = pol(p)
+
+    def d(self, host, actor="human", method="GET", ips=None):
+        return gp.decide(self.p, host, host, host, True, "https", 443, "/x", actor, ips, method=method)
+
+    def test_human_read_allowed_as_browse(self):
+        r = self.d("cdn.acmestatic.com")
+        self.assertEqual((r.allowed, r.category), (True, "browse"))
+        self.assertTrue(self.d("cdn.acmestatic.com", method="HEAD").allowed)
+
+    def test_tools_and_claude_refused(self):
+        self.assertEqual(self.d("cdn.acmestatic.com", actor="tool:katana").reason, "browse-human-only")
+        self.assertEqual(self.d("cdn.acmestatic.com", actor="claude").reason, "browse-human-only")
+
+    def test_write_methods_need_any(self):
+        self.assertEqual(self.d("cdn.acmestatic.com", method="POST").reason, "browse-read-only")
+        self.assertEqual(self.d("cdn.acmestatic.com", method=None).reason, "browse-read-only")
+        self.assertTrue(self.d("login.idp.test", method="POST").allowed)
+
+    def test_out_of_scope_never_browse(self):
+        self.assertEqual(self.d("community.acme.com").reason, "out-of-scope")
+
+    def test_internal_address_still_refused(self):
+        self.assertEqual(self.d("cdn.acmestatic.com", ips=["10.1.2.3"]).reason, "internal-address")
+
+    def test_malformed_entries_dropped(self):
+        self.assertEqual(sorted(self.p.browse), ["cdn.acmestatic.com", "community.acme.com", "login.idp.test"])
+        self.assertEqual(self.d("other.test").reason, "not-in-scope")
+
+    def test_host_level_allows_upstream_connect(self):
+        self.assertEqual(self.p.host_decision("cdn.acmestatic.com"), (None, "browse"))
+        self.assertEqual(self.p.host_decision("community.acme.com")[0], "out-of-scope")
+
+    def test_no_browse_key_is_the_old_behaviour(self):
+        p = pol()
+        self.assertEqual(p.browse, {})
+        self.assertEqual(gp.decide(p, "cdn.acmestatic.com", "cdn.acmestatic.com", "cdn.acmestatic.com", True,
+                                   "https", 443, "/", "human", method="GET").reason, "not-in-scope")
+
+    def test_in_scope_targets_unchanged(self):
+        r = self.d("www.acme.com", actor="tool:katana", method="POST")
+        self.assertEqual((r.allowed, r.category), (True, "target"))
+
+
 class ScopeMatching(unittest.TestCase):
     def setUp(self):
         self.p = pol()

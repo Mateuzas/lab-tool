@@ -72,6 +72,7 @@ class BountyGuard(object):
         self.snap_sig = None
         self.target_bucket = None
         self.recon_bucket = None
+        self.browse_bucket = None
         self.tunnels = {}
         self.dns = {}
         self.egress_ip = None
@@ -117,6 +118,7 @@ class BountyGuard(object):
         if policy is not None:
             self.target_bucket = gp.RateLimiter(policy.rps)
             self.recon_bucket = gp.RateLimiter(policy.recon["rate_limit_rps"])
+            self.browse_bucket = gp.RateLimiter(gp.BROWSE_RPS)
             self.dns.clear()
             if not self.egress_started and policy.recon.get("egress_ip_url"):
                 self.egress_started = True
@@ -238,7 +240,7 @@ class BountyGuard(object):
         authority = tunnel.host if tunnel is not None else req.host
         tls = bool(flow.client_conn.tls_established)
         d = gp.decide(policy, authority, flow.client_conn.sni, req.host_header, tls, req.scheme, req.port,
-                      req.path, actor)
+                      req.path, actor, method=req.method)
         meta["category"], meta["host"] = d.category, d.host
         # mitmproxy connects to request.host:port; it must be the agreed host (and the CONNECT port).
         if d.allowed and (gp.norm_host(req.host) != d.host or (tunnel is not None and tunnel.port != req.port)):
@@ -257,7 +259,7 @@ class BountyGuard(object):
         meta["ip"] = ips[0] if ips else None
         if reason:
             return self._refuse(flow, meta, reason)
-        bucket = self.recon_bucket if d.category == "recon-source" else self.target_bucket
+        bucket = {"recon-source": self.recon_bucket, "browse": self.browse_bucket}.get(d.category, self.target_bucket)
         wait = bucket.reserve(time.monotonic())
         if wait is None:
             return self._refuse(flow, meta, "rate-limited")
@@ -266,7 +268,7 @@ class BountyGuard(object):
         if self.policy is not policy:   # reloaded while waiting: decide again with the new profile
             policy = self.policy
             d = gp.decide(policy, authority, flow.client_conn.sni, req.host_header, tls, req.scheme, req.port,
-                          req.path, actor, ips)
+                          req.path, actor, ips, method=req.method)
             if not d.allowed:
                 return self._refuse(flow, meta, d.reason)
             meta["program"] = policy.handle
