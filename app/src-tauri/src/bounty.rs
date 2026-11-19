@@ -990,6 +990,266 @@ impl Bounty {
     }
 }
 
+// ---- Findings and time tracking (FE-10, CONTRACTS §14.3) ----
+
+/// A `finding list --json` row (CONTRACTS §7). Hand-edited front matter can hold anything, so every
+/// field is lenient: a wrong type reads as empty instead of failing the whole list.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Finding {
+    pub id: String,
+    #[serde(default, deserialize_with = "lenient_str")]
+    pub program: Option<String>,
+    #[serde(default, deserialize_with = "lenient_str")]
+    pub title: Option<String>,
+    #[serde(default, deserialize_with = "lenient_str")]
+    pub severity: Option<String>,
+    #[serde(default, deserialize_with = "lenient_str")]
+    pub status: Option<String>,
+    #[serde(default, deserialize_with = "lenient_count")]
+    pub flows: u32,
+    #[serde(default, deserialize_with = "lenient_str")]
+    pub created: Option<String>,
+    #[serde(default, deserialize_with = "lenient_num")]
+    pub payout_eur: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct RunningTimer {
+    pub handle: String,
+    #[serde(default)]
+    pub start: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub note: String,
+    #[serde(default)]
+    pub seconds: f64,
+}
+
+/// `time status --json`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TimeStatus {
+    #[serde(default)]
+    pub running: Option<RunningTimer>,
+    #[serde(default)]
+    pub today_seconds: f64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TimeRow {
+    pub handle: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
+    pub name: String,
+    #[serde(default)]
+    pub hours: f64,
+    #[serde(default)]
+    pub sessions: u32,
+    #[serde(default)]
+    pub findings: std::collections::BTreeMap<String, u32>,
+    #[serde(default)]
+    pub payout_eur: f64,
+    #[serde(default)]
+    pub eur_per_hour: Option<f64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct TimeTotals {
+    #[serde(default)]
+    pub hours: f64,
+    #[serde(default)]
+    pub payout_eur: f64,
+    /// From Intigriti's payouts; null when they were never synced.
+    #[serde(default)]
+    pub paid_eur_api: Option<f64>,
+    #[serde(default)]
+    pub payouts_api: Option<u32>,
+    #[serde(default)]
+    pub eur_per_hour: Option<f64>,
+}
+
+/// `time report --json --since D`.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TimeReport {
+    #[serde(default)]
+    pub since_days: f64,
+    #[serde(default)]
+    pub programs: Vec<TimeRow>,
+    #[serde(default)]
+    pub totals: TimeTotals,
+}
+
+fn lenient_str<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::String(s) if !s.is_empty() => Some(s),
+        Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    })
+}
+
+fn lenient_num<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Number(n) => n.as_f64(),
+        Value::String(s) => s.trim().parse().ok(),
+        _ => None,
+    })
+}
+
+fn lenient_count<'de, D: Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Number(n) => n.as_u64().map_or(0, |n| n.min(u32::MAX as u64) as u32),
+        Value::Array(a) => a.len() as u32,
+        _ => 0,
+    })
+}
+
+const ONE_LINE_MAX: usize = 200;
+
+fn slug_like(s: &str, max: usize) -> bool {
+    let b = s.as_bytes();
+    (1..=max).contains(&b.len())
+        && (b[0].is_ascii_lowercase() || b[0].is_ascii_digit())
+        && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
+/// `^[a-z0-9][a-z0-9-]{0,59}$`
+pub fn finding_slug_ok(s: &str) -> bool {
+    slug_like(s, 60)
+}
+
+/// `^[a-z0-9][a-z0-9-]{0,127}$` (as bounty/findings.py).
+pub fn time_handle_ok(s: &str) -> bool {
+    slug_like(s, 128)
+}
+
+/// `^[a-z0-9][a-z0-9-]{0,190}$`: `<handle>-<slug>`.
+pub fn finding_id_ok(s: &str) -> bool {
+    slug_like(s, 191)
+}
+
+/// A note or title: one line, at most 200 characters, trimmed. Empty -> None.
+pub fn one_line(s: Option<&str>, what: &str) -> Result<Option<String>, String> {
+    let Some(s) = s.map(str::trim).filter(|s| !s.is_empty()) else { return Ok(None) };
+    if s.chars().any(char::is_control) || s.chars().count() > ONE_LINE_MAX {
+        return Err(format!("The {what} is one line of at most {ONE_LINE_MAX} characters."));
+    }
+    Ok(Some(s.to_string()))
+}
+
+/// Exit 64 -> the CLI's `bounty: usage:` message; anything else -> `failure()`.
+fn usage_failure(code: Option<i32>, stderr_lines: &[String], what: &str, status: std::process::ExitStatus) -> (String, String) {
+    if code == Some(64) {
+        if let Some(e) = stderr_lines.iter().rev().find_map(|l| parse_error(l).filter(|(c, _)| c == "usage")) {
+            return e;
+        }
+    }
+    failure(stderr_lines, what, status)
+}
+
+/// Run `host/bounty <args>`; stdout on success, the error message otherwise. `what` names the run
+/// in errors (no titles or notes in it).
+fn bounty_run(args: &[String], what: &str) -> Result<Vec<u8>, String> {
+    let repo = repo_dir()?;
+    let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = cli(&repo, "host/bounty", &argv).output().map_err(|e| format!("couldn't run {what}: {e}"))?;
+    if out.status.success() {
+        return Ok(out.stdout);
+    }
+    let lines: Vec<String> = String::from_utf8_lossy(&out.stderr).lines().map(str::to_string).collect();
+    Err(usage_failure(out.status.code(), &lines, what, out.status).1)
+}
+
+fn bounty_json<T: serde::de::DeserializeOwned>(args: &[String], what: &str) -> Result<T, String> {
+    let out = bounty_run(args, what)?;
+    serde_json::from_slice(&out).map_err(|e| format!("{what}: unexpected output ({e})"))
+}
+
+fn strings(a: &[&str]) -> Vec<String> {
+    a.iter().map(|s| s.to_string()).collect()
+}
+
+pub fn findings_args(handle: Option<&str>) -> Result<Vec<String>, String> {
+    let mut args = strings(&["finding", "list", "--json"]);
+    if let Some(h) = handle.filter(|h| !h.is_empty()) {
+        if !time_handle_ok(h) {
+            return Err("That isn't a program handle.".into());
+        }
+        args.push(format!("--handle={h}"));
+    }
+    Ok(args)
+}
+
+pub fn findings(handle: Option<&str>) -> Result<Vec<Finding>, String> {
+    bounty_json(&findings_args(handle)?, "finding list")
+}
+
+pub fn finding_new_args(slug: &str, title: Option<&str>, handle: &str) -> Result<Vec<String>, String> {
+    if !finding_slug_ok(slug) {
+        return Err("The short id is lower-case letters, digits and -, up to 60 (like idor-shared-folder).".into());
+    }
+    if !time_handle_ok(handle) {
+        return Err("That isn't a program handle.".into());
+    }
+    let mut args = strings(&["finding", "new", slug]);
+    if let Some(t) = one_line(title, "title")? {
+        args.push(format!("--title={t}"));
+    }
+    args.push(format!("--handle={handle}"));
+    Ok(args)
+}
+
+pub fn finding_new(slug: &str, title: Option<&str>, handle: &str) -> Result<(), String> {
+    bounty_run(&finding_new_args(slug, title, handle)?, "finding new").map(|_| ())
+}
+
+/// `<findings>/<id>/finding.md`, after checking the id and that the file exists (never read here).
+pub fn finding_path(findings_dir: &std::path::Path, id: &str) -> Result<PathBuf, String> {
+    if !finding_id_ok(id) {
+        return Err("That isn't a finding id.".into());
+    }
+    let p = findings_dir.join(id).join("finding.md");
+    if !p.is_file() {
+        return Err(format!("{id} has no finding.md."));
+    }
+    Ok(p)
+}
+
+pub fn finding_open(id: &str) -> Result<(), String> {
+    let p = finding_path(&workspace_dir()?.join("findings"), id)?;
+    let st = Command::new("/usr/bin/open").arg("-t").arg(&p).stdin(Stdio::null()).status()
+        .map_err(|e| format!("Couldn't open the finding: {e}"))?;
+    if st.success() { Ok(()) } else { Err(format!("Couldn't open the finding ({st}).")) }
+}
+
+pub fn time_status() -> Result<TimeStatus, String> {
+    bounty_json(&strings(&["time", "status", "--json"]), "time status")
+}
+
+pub fn time_start_args(note: Option<&str>) -> Result<Vec<String>, String> {
+    let mut args = strings(&["time", "start"]);
+    if let Some(n) = one_line(note, "note")? {
+        args.push("--".into()); // a note starting with - is still a note
+        args.push(n);
+    }
+    Ok(args)
+}
+
+pub fn time_start(note: Option<&str>) -> Result<(), String> {
+    bounty_run(&time_start_args(note)?, "time start").map(|_| ())
+}
+
+pub fn time_stop() -> Result<(), String> {
+    bounty_run(&strings(&["time", "stop"]), "time stop").map(|_| ())
+}
+
+pub fn time_report_args(since_days: f64) -> Result<Vec<String>, String> {
+    if !(since_days.is_finite() && since_days > 0.0 && since_days <= 3650.0) {
+        return Err("Look back between a day and ten years.".into());
+    }
+    Ok(vec!["time".into(), "report".into(), "--json".into(), "--since".into(), format!("{since_days}")])
+}
+
+pub fn time_report(since_days: f64) -> Result<TimeReport, String> {
+    bounty_json(&time_report_args(since_days)?, "time report")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1365,6 +1625,96 @@ mod tests {
                    Some("Burp is already open; quit it first if it isn't using the guard (Settings > Network > Upstream proxy)"));
         assert_eq!(burp_note(&[]), None);
         assert_eq!(burp_note(&["launching Burp".to_string()]), None);
+    }
+
+    #[test]
+    fn finding_inputs_validated() {
+        assert!(finding_slug_ok("idor-shared-folder") && finding_slug_ok("1") && finding_slug_ok(&"a".repeat(60)));
+        for bad in ["", "-x", "Idor", "a b", "a_b", "a/../b", &"a".repeat(61)] {
+            assert!(!finding_slug_ok(bad), "{bad}");
+        }
+        assert!(time_handle_ok("intigriti-dropbox") && time_handle_ok("manual-friends-site"));
+        assert!(!time_handle_ok("--handle") && !time_handle_ok(&"a".repeat(129)) && !time_handle_ok("A"));
+        assert!(finding_id_ok("intigriti-dropbox-idor-shared-folder"));
+        for bad in ["", "-a", "..", "a/b", "a.md", &"a".repeat(192)] {
+            assert!(!finding_id_ok(bad), "{bad}");
+        }
+        assert_eq!(finding_new_args("idor", Some(" IDOR on shared folders "), "intigriti-dropbox").unwrap(),
+                   vec!["finding", "new", "idor", "--title=IDOR on shared folders", "--handle=intigriti-dropbox"]);
+        assert_eq!(finding_new_args("idor", Some("  "), "intigriti-dropbox").unwrap(),
+                   vec!["finding", "new", "idor", "--handle=intigriti-dropbox"]);
+        assert!(finding_new_args("Bad Slug", None, "intigriti-dropbox").is_err());
+        assert!(finding_new_args("idor", None, "-x").is_err());
+        assert!(finding_new_args("idor", Some("two\nlines"), "intigriti-dropbox").is_err());
+        assert!(finding_new_args("idor", Some(&"t".repeat(201)), "intigriti-dropbox").is_err());
+        assert!(finding_new_args("idor", Some(&"é".repeat(200)), "intigriti-dropbox").is_ok());
+        assert_eq!(findings_args(None).unwrap(), vec!["finding", "list", "--json"]);
+        assert_eq!(findings_args(Some("intigriti-dropbox")).unwrap(), vec!["finding", "list", "--json", "--handle=intigriti-dropbox"]);
+        assert!(findings_args(Some("x y")).is_err());
+    }
+
+    #[test]
+    fn finding_path_needs_the_file() {
+        let dir = std::env::temp_dir().join(format!("kl-fe10-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("intigriti-x-idor")).unwrap();
+        std::fs::write(dir.join("intigriti-x-idor/finding.md"), "---\n").unwrap();
+        assert_eq!(finding_path(&dir, "intigriti-x-idor").unwrap(), dir.join("intigriti-x-idor/finding.md"));
+        assert!(finding_path(&dir, "intigriti-x-missing").is_err());
+        assert!(finding_path(&dir, "../etc").is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn time_inputs_validated() {
+        assert_eq!(time_start_args(None).unwrap(), vec!["time", "start"]);
+        assert_eq!(time_start_args(Some("")).unwrap(), vec!["time", "start"]);
+        assert_eq!(time_start_args(Some("-sharing")).unwrap(), vec!["time", "start", "--", "-sharing"]);
+        assert!(time_start_args(Some("a\rb")).is_err());
+        assert_eq!(time_report_args(30.0).unwrap(), vec!["time", "report", "--json", "--since", "30"]);
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, 4000.0] {
+            assert!(time_report_args(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn findings_and_time_parse() {
+        let f: Vec<Finding> = serde_json::from_str(r#"[
+            {"id":"intigriti-dropbox-idor","program":"intigriti-dropbox","title":"IDOR","severity":"high","status":"draft","flows":2,"created":"2026-11-18T10:00:00Z","payout_eur":null},
+            {"id":"intigriti-dropbox-xss","program":"intigriti-dropbox","title":"","severity":null,"status":"accepted","flows":0,"created":null,"payout_eur":750},
+            {"id":"legacy","program":null,"title":null,"severity":"Medium (6.5)","status":"draft","flows":0,"created":"2026-01-02","payout_eur":"120.5"}]"#).unwrap();
+        assert_eq!(f[0].flows, 2);
+        assert_eq!(f[0].payout_eur, None);
+        assert_eq!(f[1].payout_eur, Some(750.0));
+        assert_eq!(f[1].title, None);
+        assert_eq!(f[2].payout_eur, Some(120.5));
+        assert_eq!(f[2].program, None);
+
+        let idle: TimeStatus = serde_json::from_str(r#"{"running":null,"today_seconds":0}"#).unwrap();
+        assert_eq!(idle.running, None);
+        let run: TimeStatus = serde_json::from_str(r#"{"running":{"handle":"intigriti-dropbox","start":"2026-11-19T09:00:00Z","note":null,"seconds":4320},"today_seconds":9000.5}"#).unwrap();
+        assert_eq!(run.running.as_ref().unwrap().seconds, 4320.0);
+        assert_eq!(run.running.unwrap().note, "");
+
+        let r: TimeReport = serde_json::from_str(r#"{"since_days":30,"programs":[{"handle":"intigriti-dropbox","name":"Dropbox","hours":12.5,"sessions":7,
+            "findings":{"draft":1,"accepted":1},"payout_eur":750,"eur_per_hour":60},{"handle":"intigriti-x","name":"X","hours":0,"sessions":0,"findings":{},"payout_eur":0,"eur_per_hour":null}],
+            "totals":{"hours":12.5,"payout_eur":750,"paid_eur_api":null,"payouts_api":null,"eur_per_hour":60}}"#).unwrap();
+        assert_eq!(r.programs[0].findings["accepted"], 1);
+        assert_eq!(r.programs[1].eur_per_hour, None);
+        assert_eq!(r.totals.paid_eur_api, None);
+        assert_eq!(r.totals.payouts_api, None);
+        let synced: TimeTotals = serde_json::from_str(r#"{"hours":1,"payout_eur":0,"paid_eur_api":1250.0,"payouts_api":2,"eur_per_hour":null}"#).unwrap();
+        assert_eq!((synced.paid_eur_api, synced.payouts_api), (Some(1250.0), Some(2)));
+    }
+
+    #[test]
+    fn findings_errors_by_exit_code() {
+        use std::os::unix::process::ExitStatusExt;
+        let st = std::process::ExitStatus::from_raw(64 << 8);
+        let usage = vec!["usage: bounty time ...".to_string(), "bounty: usage: no active program in the guard: pass --handle".to_string()];
+        assert_eq!(usage_failure(Some(64), &usage, "time start", st).1, "no active program in the guard: pass --handle");
+        assert_eq!(usage_failure(Some(64), &["boom".into()], "time start", st).1, "time start failed: boom");
+        assert_eq!(usage_failure(Some(1), &["bounty: guard: docker missing".into()], "time start", st),
+                   ("guard".into(), "docker missing".into()));
     }
 
     /// Reads the real guard (read-only). Run with: cargo test live_guard_status -- --ignored --nocapture
