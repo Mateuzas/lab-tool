@@ -273,6 +273,13 @@ class BountyGuard(object):
         if d.category == "target":
             for name, value in policy.ident.headers(req.headers.get("User-Agent")).items():
                 req.headers[name] = value   # replaces any existing header of that name
+        # server_connect pins each upstream connection to the checked IP, so mitmproxy can't match it
+        # to the next request's host:port and never reuses it; without this every request left an
+        # idle connection open to the target for as long as the client stayed connected (a long
+        # Burp session: hundreds), and servers that limit connections stalled. One connection per
+        # request, closed by the server after its answer. HTTP/1 only: HTTP/2 has no such header.
+        if req.http_version.startswith("HTTP/1"):
+            req.headers["Connection"] = "close"
 
     async def server_connect(self, data):
         """Last gate before any upstream connection: host allowed by the current profile, every
