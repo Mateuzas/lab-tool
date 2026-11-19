@@ -32,6 +32,9 @@ PROXY = "http://127.0.0.1:8080"
 PROGRAMS = "/bounty/programs"
 WORK = "/bounty/work"
 HOST_TIMEOUT = 600
+# Above the guard's rate-limit queue (it holds a request up to 10 s before refusing it): with
+# 10 s a slow program's queued requests timed out and nuclei skipped the host mid-scan.
+TOOL_TIMEOUT = 30
 _children = []
 
 
@@ -92,7 +95,7 @@ def rate(profile):
 
 def check(host, root, rl):
     cmd = ["nuclei", "-u", root, "-t", TEMPLATES, "-j", "-or", "-ot", "-silent", "-nc", "-duc", "-ni",
-           "-rl", str(rl), "-c", "1", "-bs", "1", "-timeout", "10", "-retries", "0", "-mhe", "5",
+           "-rl", str(rl), "-c", "1", "-bs", "1", "-timeout", str(TOOL_TIMEOUT), "-retries", "0", "-nmhe",
            "-H", "X-Bounty-Actor: tool:nuclei", "-proxy", PROXY]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     _children.append(p)
