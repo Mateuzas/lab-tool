@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { setupGuard } from "./guard";
 import { setupLookHere } from "./lookhere";
 import { setupAccess } from "./access";
+import { setupFindings } from "./findings";
+import { setupTimer } from "./timer";
 
 /**
  * Bug bounty's Programs screen (FE-2). Shows the cached ranking at once, refreshes in the
@@ -180,7 +182,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   const guard = setupGuard({
     visible: opts.visible,
     nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
-    onChange: () => { markActive(); look.redraw(); access.redraw(); },
+    onChange: () => { markActive(); look.redraw(); access.redraw(); timer.redraw(); },
   });
   const look = setupLookHere({
     nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
@@ -190,6 +192,18 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
   const access = setupAccess({
     nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
     active: () => guard.active(),
+    onClose: () => { wrap.focus({ preventScroll: true }); },
+  });
+  const timer = setupTimer({
+    visible: opts.visible,
+    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
+    active: () => guard.active(),
+    say: (text) => guard.say(text),
+  });
+  const findings = setupFindings({
+    nameOf: (h) => ranking?.programs.find((p) => p.handle === h)?.name || manual.find((m) => m.handle === h)?.name || h,
+    timer: () => void timer.toggle(),
+    hunter: () => void guard.hunter(),
     onClose: () => { wrap.focus({ preventScroll: true }); },
   });
   const openAccess = () => { if (guard.gate("the access check")) access.open(); };
@@ -315,6 +329,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     if (selected === null || !rows.has(selected)) selected = visibleHandles[0] ?? null;
     markSelected(false);
     markActive();
+    timer.redraw(); // program names may have just loaded
     for (const th of headRow.children) {
       const k = (th as HTMLElement).dataset.col;
       th.setAttribute("aria-sort", k === sort.key ? (sort.dir === 1 ? "ascending" : "descending") : "none");
@@ -680,6 +695,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     const t = e.target as HTMLElement;
     if (look.isOpen()) { if (look.key(e)) e.preventDefault(); return; }
     if (access.isOpen()) { if (access.key(e)) e.preventDefault(); return; }
+    if (findings.isOpen()) { if (findings.key(e)) e.preventDefault(); return; }
     if (t === filterBox) {
       if (e.key === "Escape") { e.preventDefault(); if (filterBox.value) { filterBox.value = ""; filter = ""; render(); } else filterBox.blur(); }
       else if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
@@ -712,6 +728,8 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "t": void guard.shell(); break;
       case "h": void guard.hunter(); break;
       case "v": openAccess(); break;
+      case "f": if (selected) findings.open(selected); break;
+      case "T": void timer.toggle(); break;
       case "g": void guard.stop(); break;
       case "a": void cycleApplication(); break;
       case "?": toggleHelp(true); break;
@@ -759,11 +777,12 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
     /** App start: the cached ranking at once, then a background refresh. */
     async start() {
       guard.wake();
+      timer.wake();
       await load();
       void loadAlerts();
       await refresh();
     },
     focus() {
-      guard.wake(); if (document.activeElement === document.body || !document.activeElement) wrap.focus({ preventScroll: true }); },
+      guard.wake(); timer.wake(); if (document.activeElement === document.body || !document.activeElement) wrap.focus({ preventScroll: true }); },
   };
 }

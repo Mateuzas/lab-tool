@@ -262,6 +262,40 @@ async function acReplay(args: { ids: string[]; unsafeIds: string[]; onEvent: { i
   send({ kind: "done", changes: [] });
   return null;
 }
+// ---- Findings and time (CONTRACTS §14.3): ?fd=empty (no findings anywhere) ; ?t=run (a timer runs
+// for the guard's program since 1h12 ago) | idle (default) ; ?api=1 (Intigriti payouts were synced).
+const fdMode = new URLSearchParams(location.search).get("fd") ?? "some";
+let findings = fdMode === "empty" ? [] as Record<string, unknown>[] : [
+  { id: "intigriti-dropbox-idor-shared-folder", program: "intigriti-dropbox", title: "IDOR: a team member can read another team's shared folder",
+    severity: "high", status: "draft", flows: 3, created: iso(60 * 5), payout_eur: null },
+  { id: "intigriti-dropbox-paper-export-no-auth", program: "intigriti-dropbox", title: "Paper export answers without a session",
+    severity: "medium", status: "accepted", flows: 2, created: iso(60 * 24 * 9), payout_eur: 750 },
+  { id: "intigriti-intergamma-open-redirect-login", program: "intigriti-intergamma", title: "Open redirect after login",
+    severity: "low", status: "duplicate", flows: 1, created: iso(60 * 24 * 14), payout_eur: null },
+];
+const timeMode = new URLSearchParams(location.search).get("t") ?? "idle";
+let timerRun: { handle: string; start: string; note: string; t0: number } | null =
+  timeMode === "run" ? { handle: "intigriti-dropbox", start: iso(72), note: "", t0: Date.now() - 72 * 60000 } : null;
+const timeStatus = () => ({
+  running: timerRun ? { handle: timerRun.handle, start: timerRun.start, note: timerRun.note, seconds: (Date.now() - timerRun.t0) / 1000 } : null,
+  today_seconds: 2 * 3600 + 15 * 60 + (timerRun ? (Date.now() - timerRun.t0) / 1000 : 0),
+});
+function timeReport(sinceDays: number) {
+  const rows = [
+    { handle: "intigriti-dropbox", name: "Dropbox", hours: 12.5, sessions: 7, payout_eur: 750 },
+    { handle: "intigriti-intergamma", name: "Intergamma", hours: 3.25, sessions: 2, payout_eur: 0 },
+  ].map((r) => {
+    const mine = findings.filter((f) => f.program === r.handle);
+    const counts: Record<string, number> = {};
+    for (const f of mine) counts[String(f.status)] = (counts[String(f.status)] ?? 0) + 1;
+    const paid = fdMode === "empty" ? 0 : r.payout_eur;
+    return { ...r, payout_eur: paid, findings: counts, eur_per_hour: r.hours ? Math.round((paid / r.hours) * 100) / 100 : null };
+  });
+  const hours = rows.reduce((a, r) => a + r.hours, 0), paid = rows.reduce((a, r) => a + r.payout_eur, 0);
+  const api = new URLSearchParams(location.search).get("api") === "1";
+  return { since_days: sinceDays, programs: rows,
+    totals: { hours, payout_eur: paid, paid_eur_api: api ? 1250 : null, payouts_api: api ? 2 : null, eur_per_hour: hours ? Math.round((paid / hours) * 100) / 100 : null } };
+}
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 let refreshing = false;
 
@@ -315,6 +349,25 @@ async function bountyRefresh(channel: { id: number }) {
     }
     if (cmd === "bounty_ac_clear_session") { acSessions = { ...acSessions, [args.who]: null }; return null; }
     if (cmd === "bounty_ac_replay") return acReplay(args as unknown as { ids: string[]; unsafeIds: string[]; onEvent: { id: number } });
+    if (cmd === "bounty_findings") { await sleep(60); const h = (args as Record<string, string | null>).handle; return findings.filter((f) => !h || f.program === h); }
+    if (cmd === "bounty_time_report") { await sleep(50); return timeReport(Number((args as unknown as { sinceDays: number }).sinceDays)); }
+    if (cmd === "bounty_time_status") return timeStatus();
+    if (cmd === "bounty_finding_new") {
+      const a = args as unknown as { slug: string; title: string | null; handle: string };
+      if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(a.slug)) throw "slug: lower case letters, digits and -, up to 60 (e.g. idor-shared-folder)";
+      const id = `${a.handle}-${a.slug}`;
+      if (findings.some((f) => f.id === id)) throw `${id} already exists`;
+      await sleep(120);
+      findings = [{ id, program: a.handle, title: a.title ?? "", severity: "tbd", status: "draft", flows: 0, created: iso(0), payout_eur: null }, ...findings];
+      return null;
+    }
+    if (cmd === "bounty_finding_open") { console.info("open -t", args.id); return null; }
+    if (cmd === "bounty_time_start") {
+      if (!(guard.running && guard.program)) throw "no active program in the guard: pass --handle";
+      timerRun = { handle: String(guard.program), start: iso(0), note: args.note ?? "", t0: Date.now() };
+      emit("bounty-time-updated", null); return null;
+    }
+    if (cmd === "bounty_time_stop") { timerRun = null; emit("bounty-time-updated", null); return null; }
     if (cmd === "bounty_guard_status") return guardStatus();
     if (cmd === "bounty_use") { await sleep(500); guard = gActive(args.handle); return guard; }
     if (cmd === "bounty_guard_stop") { await sleep(300); guard = G0; return null; }
