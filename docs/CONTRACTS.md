@@ -618,4 +618,17 @@ while one runs stops that one first. `time stop` appends `{"start","end","note"}
 findings: {status: n}, payout_eur, eur_per_hour}` (payouts from the findings' `payout_eur`; null
 €/h when there's no time), sorted by €/h then hours. Times are UTC; a session that spans the
 `--since` cut counts only its part inside the window.
+`time status --json`: `{running: {handle, start, note, seconds} | null, today_seconds}`.
+`time report --json`: `{since_days, programs: [the rows above], totals: {hours, payout_eur (from
+findings), paid_eur_api, payouts_api, eur_per_hour}}`; `eur_per_hour` uses the API payouts when
+synced, else the findings' `payout_eur`.
+
+### 14.1 Payouts (BE-26)
+`host/bounty payouts sync` (needs the token, like `programs sync`) pages `GET /v1/payouts` into
+`workspace/bounty/payouts.json` `{synced_at, records: [{id, amount, currency, eur, status,
+created_at, paid_at}]}`; `eur` uses the ranking config's fixed `fx` (unknown currency → null, never
+guessed). A full `programs sync` (no `--handle`) also refreshes payouts (one more request); a
+failure there is logged and never fails the sync. The API's payout has no program or submission
+link, so payouts feed the overall €/h; per-program €/h comes from the findings' `payout_eur`.
+"Paid" = has `paid_at`; the window is by `paid_at`.
 

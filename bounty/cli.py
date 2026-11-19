@@ -8,6 +8,7 @@ import sys
 from bounty import ac as ac_mod
 from bounty import applications
 from bounty import findings as findings_mod
+from bounty import payouts as payouts_mod
 from bounty import show as show_mod
 from bounty import timelog as time_mod
 from bounty import changes as changes_mod
@@ -121,10 +122,15 @@ def build_parser():
     ts_.add_argument("note", nargs="?", help="what you're doing, e.g. 'access control on sharing'")
     ts_.add_argument("--handle")
     tms.add_parser("stop", help="stop the running timer")
-    tms.add_parser("status", help="the running timer and today's total")
+    tst = tms.add_parser("status", help="the running timer and today's total")
+    tst.add_argument("--json", action="store_true")
     tr = tms.add_parser("report", help="hours, findings, payouts and €/h per program")
     tr.add_argument("--since", type=float, default=30.0, metavar="DAYS")
     tr.add_argument("--json", action="store_true")
+
+    po = sub.add_parser("payouts", help="your own Intigriti payouts (CONTRACTS §14.1)")
+    pos = po.add_subparsers(dest="cmd")
+    pos.add_parser("sync", help="fetch them into payouts.json (needs the Intigriti token)")
 
     fd = sub.add_parser("finding", help="finding drafts (CONTRACTS §7)")
     fds = fd.add_subparsers(dest="cmd")
@@ -188,6 +194,13 @@ def cmd_sync(args, ws):
              c["details_planned"], idx["mode"], c["activities_new"], idx["requests"], idx["ts"]))
     for e in idx["errors"]:
         sys.stderr.write("bounty: %s: %s: %s\n" % (e["code"], e["handle"], e["message"]))
+    if not args.handle:
+        # Your payouts ride along (one request): €/h stays current with the background sync.
+        # A failure here never fails the program sync.
+        try:
+            payouts_mod.sync(client, ws)
+        except BountyError as e:
+            _err("payouts: %s (programs synced fine)" % _scrub(e.message))
     return 0
 
 
@@ -210,6 +223,14 @@ def _intigriti(progs):
     """Ranking, counts and the Intigriti sync ignore manual targets (CONTRACTS §2, legal_basis
     "authorization"): a manual profile has no platform_id and is never sent to the API."""
     return [p for p in progs if (p.get("platform") or "intigriti") == "intigriti"]
+
+
+def cmd_payouts_sync(args, ws):
+    token = os.environ.get(TOKEN_ENV)
+    if not token:
+        raise BountyError("auth", "INTIGRITI_TOKEN not set (run via scripts/secrets.sh exec intigriti"
+                                  " -- host/bounty …)", 2)
+    return payouts_mod.sync(Client(token, log=_err), ws)
 
 
 def cmd_status(args, ws):
@@ -354,9 +375,10 @@ def main(argv=None):
         ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
         ("recon", "exposures"): lambda a, w: recon_mod.exposures_cmd(w, a.limit),
         ("program", "show"): lambda a, w: show_mod.show(w, a.handle, a.json),
+        ("payouts", "sync"): cmd_payouts_sync,
         ("time", "start"): lambda a, w: time_mod.start(w, a.note, a.handle),
         ("time", "stop"): lambda a, w: time_mod.stop(w),
-        ("time", "status"): lambda a, w: time_mod.status(w),
+        ("time", "status"): lambda a, w: time_mod.status(w, a.json),
         ("time", "report"): lambda a, w: time_mod.report(w, a.since, a.json),
         ("finding", "new"): lambda a, w: findings_mod.new(w, a.slug, a.title, a.handle),
         ("finding", "list"): lambda a, w: findings_mod.list_cmd(w, a.handle, a.json),

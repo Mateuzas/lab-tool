@@ -142,7 +142,8 @@ connect.
 | `finding list [--handle H] [--json]` | your findings, newest first (older drafts without front matter are read too) |
 | `finding evidence <id> FLOW_ID…` | copies flows into `findings/<id>/evidence/` with credentials redacted (headers, URL tokens, secret JSON/form fields); other body content is kept, so review it before attaching |
 | `time start [note]` / `time stop` / `time status` | a timer per program (default the active one); starting another stops the running one |
-| `time report [--since DAYS] [--json]` | hours, findings by status, payouts (`payout_eur` in each finding) and €/h per program |
+| `time report [--since DAYS] [--json]` | hours, findings by status and payouts per program (`payout_eur` in each finding), plus a total line with your real Intigriti payouts and overall €/h |
+| `payouts sync` | your own Intigriti payouts into `payouts.json` (also done by every full `programs sync`, so the app keeps it current) |
 
 Files: `workspace/bounty/work/<h>/recon/` (`hosts.jsonl`, `live.jsonl`, `urls.jsonl`,
 `mapped.json`, `state.json`).

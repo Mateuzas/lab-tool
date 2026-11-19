@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-from bounty import findings
+from bounty import findings, payouts
 from bounty.util import BountyError, iso, parse_time, read_json, utcnow, write_json
 
 OPEN = "time-open.json"
@@ -78,7 +78,30 @@ def stop(ws, out=sys.stdout, now=None):
     return 0
 
 
-def status(ws, out=sys.stdout, now=None):
+def status_data(ws, now=None):
+    """CONTRACTS §14.3: {running: {handle, start, note, seconds} | null, today_seconds}."""
+    now = now or utcnow()
+    cur = read_json(_open_path(ws))
+    day = now.replace(hour=0, minute=0, second=0)
+    total = 0.0
+    progs = os.path.join(ws, "programs")
+    for h in (os.listdir(progs) if os.path.isdir(progs) else []):
+        for s, e, _ in _sessions(ws, h):
+            if e > day:
+                total += max(0.0, (e - max(s, day)).total_seconds())
+    running = None
+    if cur:
+        start = parse_time(cur["start"])
+        total += max(0.0, (now - max(start, day)).total_seconds())
+        running = {"handle": cur["handle"], "start": cur["start"], "note": cur.get("note") or "",
+                   "seconds": int((now - start).total_seconds())}
+    return {"running": running, "today_seconds": int(total)}
+
+
+def status(ws, as_json=False, out=sys.stdout, now=None):
+    if as_json:
+        out.write(json.dumps(status_data(ws, now)) + "\n")
+        return 0
     now = now or utcnow()
     cur = read_json(_open_path(ws))
     day = now.replace(hour=0, minute=0, second=0)
@@ -131,12 +154,26 @@ def report_rows(ws, since_days=30, now=None):
     return out
 
 
-def report(ws, since_days=30, as_json=False, out=sys.stdout):
-    rs = report_rows(ws, since_days)
+def report_data(ws, since_days=30, now=None):
+    """CONTRACTS §14.1/§14.3: per program rows plus totals; API payouts when synced."""
+    now = now or utcnow()
+    rs = report_rows(ws, since_days, now)
+    hours = round(sum(r["hours"] for r in rs), 2)
+    from_findings = round(sum(r["payout_eur"] for r in rs), 2)
+    n_api, eur_api = payouts.paid_in_window(ws, now - datetime.timedelta(days=since_days))
+    earned = eur_api if eur_api is not None else from_findings
+    return {"since_days": since_days, "programs": rs,
+            "totals": {"hours": hours, "payout_eur": from_findings, "paid_eur_api": eur_api,
+                       "payouts_api": n_api, "eur_per_hour": round(earned / hours, 2) if hours else None}}
+
+
+def report(ws, since_days=30, as_json=False, out=sys.stdout, now=None):
+    data = report_data(ws, since_days, now)
     if as_json:
-        out.write(json.dumps(rs) + "\n")
+        out.write(json.dumps(data) + "\n")
         return 0
-    if not rs:
+    rs, t = data["programs"], data["totals"]
+    if not rs and not t["payouts_api"]:
         out.write("no time or findings in the last %g days: host/bounty time start\n" % since_days)
         return 0
     out.write("%-34s %7s %8s %9s  %s\n" % ("program", "hours", "€ paid", "€/h", "findings"))
@@ -144,4 +181,8 @@ def report(ws, since_days=30, as_json=False, out=sys.stdout):
         out.write("%-34s %7.2f %8.0f %9s  %s\n" % (
             r["name"][:34], r["hours"], r["payout_eur"], "-" if r["eur_per_hour"] is None else "%.0f" % r["eur_per_hour"],
             ", ".join("%s %d" % kv for kv in sorted(r["findings"].items())) or "-"))
+    paid = ("€%.0f paid by Intigriti (%d payouts)" % (t["paid_eur_api"], t["payouts_api"])
+            if t["paid_eur_api"] is not None else "€%.0f from findings (run payouts sync for real payouts)" % t["payout_eur"])
+    out.write("total: %.2f h, %s, %s €/h\n" % (t["hours"], paid,
+              "-" if t["eur_per_hour"] is None else "%.0f" % t["eur_per_hour"]))
     return 0

@@ -94,6 +94,7 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | FE-8 | Frontender | `t` / `h` keys and buttons, `?` overlay (CONTRACTS §12.4) | done (#34) |
 | BE-20 | Backender | Curated nuclei "exposure" templates only where automation is allowed; every hit is manually confirmed | done (#42) |
 | BE-25 | Backender | `finding new|list|evidence` (redacted evidence from the guard's flows), `program show`, `time start|stop|status|report` with €/h (CONTRACTS §6, §7, §14); findings live in `workspace/bounty/findings/` | done |
+| BE-26 | Backender | `payouts sync` (own Intigriti payouts, EUR via fx; also on every full sync), `time status --json`, `time report` totals with real €/h (CONTRACTS §14, §14.1) | done |
 | BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | done (#31) |
 | BE-14b | Backender | Sync hygiene: snapshots only on change, needs-join re-check daily (§11.2) | done (#31) |
 | BE-23 | Backender | Manual handles in the Tauri commands + `bounty_manual_list` + `program-closed`/`program-reopened` kinds (§10.5, §11.3) | done (#31) |
