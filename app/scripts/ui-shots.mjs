@@ -57,6 +57,15 @@ const programs = {
   "access-paste": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForSelector("#ac-cand-body tr"); await p.keyboard.press("1"); }, "synced", "active"],
   "access-empty": ["loaded", async (p) => { await p.keyboard.press("v"); await p.waitForFunction(() => /Set account A/.test(document.getElementById("ac-empty")?.textContent ?? "")); }, "synced", "active", "&ac=empty"],
   "access-off": ["loaded", async (p) => { await p.keyboard.press("v"); await p.hover("#pg-access"); }, "synced", "off"],
+  // Findings and time (FE-10): 5th element = extra query (?t=run | idle, ?fd=empty, ?api=1)
+  "findings": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("f"); await p.waitForSelector("#fd-body tr"); }, "synced", "active", "&t=run"],
+  "findings-all": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("f"); await p.waitForSelector("#fd-body tr"); await p.keyboard.press("a"); await p.waitForFunction(() => document.querySelectorAll("#fd-body tr").length === 3); }, "synced", "active", "&t=run&api=1"],
+  "findings-new": ["loaded", async (p) => { await p.click('tr[data-handle="intigriti-dropbox"]'); await p.keyboard.press("f"); await p.waitForSelector("#fd-body tr"); await p.keyboard.press("n");
+    await p.keyboard.type("SSRF in Paper preview"); await p.keyboard.press("Tab"); await p.keyboard.type("SSRF: Paper link previews fetch internal hosts"); }, "synced", "active"],
+  "findings-empty": ["loaded", async (p) => { await p.click('tbody tr[data-handle]:not([data-handle="intigriti-dropbox"]):not([data-handle="intigriti-intergamma"])'); await p.keyboard.press("f"); await p.waitForFunction(() => /^No findings for/.test(document.getElementById("fd-empty")?.textContent ?? "")); }, "synced", "active"],
+  "timer-running": ["loaded", async (p) => { await p.waitForFunction(() => document.getElementById("pg-timer")?.dataset.state === "running"); }, "synced", "active", "&t=run"],
+  "timer-idle": ["loaded", async (p) => { await p.keyboard.press("T"); }, "synced", "off"],
+  "timer-idle-active": ["loaded", null, "synced", "active"],
 };
 const scenarios = only ?? [...lab, ...Object.keys(programs)];
 

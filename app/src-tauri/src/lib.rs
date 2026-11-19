@@ -280,6 +280,51 @@ async fn bounty_ac_results() -> Result<Vec<bounty::AcResult>, String> {
     tauri::async_runtime::spawn_blocking(bounty::ac_results).await.map_err(|e| e.to_string())?
 }
 
+/// Findings, newest first; one program's or all (CONTRACTS §14.3).
+#[tauri::command]
+async fn bounty_findings(handle: Option<String>) -> Result<Vec<bounty::Finding>, String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::findings(handle.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// A new finding draft for `handle` from the template.
+#[tauri::command]
+async fn bounty_finding_new(slug: String, title: Option<String>, handle: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::finding_new(&slug, title.as_deref(), &handle)).await.map_err(|e| e.to_string())?
+}
+
+/// Open a finding's finding.md in the default text editor.
+#[tauri::command]
+async fn bounty_finding_open(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::finding_open(&id)).await.map_err(|e| e.to_string())?
+}
+
+/// The running timer (or null) and today's total.
+#[tauri::command]
+async fn bounty_time_status() -> Result<bounty::TimeStatus, String> {
+    tauri::async_runtime::spawn_blocking(bounty::time_status).await.map_err(|e| e.to_string())?
+}
+
+/// Start a timer for the guard's active program (stops a running one first).
+#[tauri::command]
+async fn bounty_time_start(app: AppHandle, note: Option<String>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::time_start(note.as_deref())).await.map_err(|e| e.to_string())??;
+    let _ = app.emit("bounty-time-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+async fn bounty_time_stop(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(bounty::time_stop).await.map_err(|e| e.to_string())??;
+    let _ = app.emit("bounty-time-updated", ());
+    Ok(())
+}
+
+/// Hours, findings, payouts and €/h per program over the last `since_days`.
+#[tauri::command]
+async fn bounty_time_report(since_days: f64) -> Result<bounty::TimeReport, String> {
+    tauri::async_runtime::spawn_blocking(move || bounty::time_report(since_days)).await.map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -296,7 +341,9 @@ pub fn run() {
             bounty_set_application, bounty_manual_list, bounty_open_shell, bounty_open_hunter,
             bounty_recon_list, bounty_recon_map, bounty_recon_exposures,
             bounty_ac_status, bounty_ac_set_session, bounty_ac_clear_session, bounty_ac_candidates,
-            bounty_ac_replay, bounty_ac_results
+            bounty_ac_replay, bounty_ac_results,
+            bounty_findings, bounty_finding_new, bounty_finding_open,
+            bounty_time_status, bounty_time_start, bounty_time_stop, bounty_time_report
         ])
         .setup(|app| {
             bounty::spawn_timer(app.handle().clone());

@@ -188,6 +188,9 @@
             <ol id="pg-refusals-items"></ol>
           </section>
         </div>
+        <button type="button" class="pg-toggle pg-work pg-timer" id="pg-timer" data-state="idle" aria-keyshortcuts="Shift+T" aria-pressed="false" aria-disabled="true">
+          <svg class="t-icon" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="9.2" r="5.6"/><path d="M8 9.2V6.2M6.2 1.6h3.6M12.4 4.4l1-1"/></svg><span class="t-text" role="status" aria-live="off">Timer</span><kbd aria-hidden="true">T</kbd>
+        </button>
         <button type="button" class="pg-toggle pg-work" id="pg-shell" aria-keyshortcuts="t" aria-disabled="true">Shell <kbd>t</kbd></button>
         <button type="button" class="pg-toggle pg-work" id="pg-hunter" aria-keyshortcuts="h" aria-disabled="true">Claude <kbd>h</kbd></button>
         <button type="button" class="pg-toggle pg-work" id="pg-access" aria-keyshortcuts="v" aria-disabled="true">Access <kbd>v</kbd></button>
@@ -317,11 +320,52 @@
         </div>
       </section>
 
+      <section class="lh fd" id="fd" role="dialog" aria-labelledby="fd-title" hidden>
+        <header class="lh-head">
+          <h2 id="fd-title"></h2>
+          <button type="button" class="pg-toggle" id="fd-all" aria-pressed="false" aria-keyshortcuts="a">All programs <kbd>a</kbd></button>
+          <button type="button" class="lh-map" id="fd-add" aria-keyshortcuts="n">New finding <kbd>n</kbd></button>
+          <button type="button" class="lh-close" id="fd-close" aria-label="Close findings">Close <kbd>Esc</kbd></button>
+        </header>
+        <p class="fd-sum" id="fd-sum" role="status"></p>
+        <p class="lh-map-line" id="fd-line" role="status" hidden></p>
+        <div class="lh-table-wrap" id="fd-wrap" tabindex="-1">
+          <table class="lh-table fd-table" id="fd-table" hidden>
+            <thead><tr><th class="fd-status" scope="col">Status</th><th class="fd-sev" scope="col">Severity</th><th class="fd-id" scope="col">Id</th><th scope="col">Title</th><th class="num fd-flows" scope="col" title="Flows saved as evidence">Flows</th><th class="num fd-eur" scope="col" title="Payout in euros">€</th></tr></thead>
+            <tbody id="fd-body"></tbody>
+          </table>
+          <div class="pg-empty" id="fd-empty" hidden></div>
+        </div>
+        <footer class="lh-foot">
+          <span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open in editor</span><span><kbd>n</kbd> new finding</span>
+          <span><kbd>a</kbd> all programs</span><span><kbd>T</kbd> timer</span><span><kbd>h</kbd> Claude</span><span><kbd>r</kbd> reload</span><span><kbd>Esc</kbd> close</span>
+        </footer>
+        <div class="ac-paste" id="fd-new" hidden>
+          <form class="ac-paste-card" id="fd-new-form" role="dialog" aria-modal="true" aria-labelledby="fd-new-title" autocomplete="off">
+            <h3 id="fd-new-title"></h3>
+            <p class="ac-paste-lead">Creates the draft from the template and opens it in your text editor.</p>
+            <label class="ac-field">
+              <span>Short id</span>
+              <span class="fd-slug-row"><code id="fd-prefix"></code><input id="fd-slug" type="text" maxlength="60" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" placeholder="idor-shared-folder" /></span>
+            </label>
+            <label class="ac-field">
+              <span>Title (optional)</span>
+              <input id="fd-title-in" type="text" maxlength="200" autocomplete="off" placeholder="IDOR: any team member can read another team's shared folder" />
+            </label>
+            <p class="ac-paste-error" id="fd-new-error" role="alert" hidden></p>
+            <div class="ac-paste-actions">
+              <button type="button" id="fd-cancel">Cancel <kbd>Esc</kbd></button>
+              <button type="submit" class="primary" id="fd-create">Create and open <kbd>↵</kbd></button>
+            </div>
+          </form>
+        </div>
+      </section>
+
       <footer class="pg-foot">
         <p class="pg-keys" aria-label="Keyboard shortcuts">
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
-          <span><kbd>u</kbd> use program</span><span><kbd>l</kbd> look here</span><span><kbd>m</kbd> map</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>v</kbd> access check</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
+          <span><kbd>u</kbd> use program</span><span><kbd>l</kbd> look here</span><span><kbd>m</kbd> map</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>v</kbd> access check</span><span><kbd>f</kbd> findings</span><span><kbd>T</kbd> timer</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
           <span><kbd>?</kbd> all keys</span>
         </p>
         <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
@@ -351,6 +395,8 @@
               <dt><kbd>x</kbd></dt><dd>Show or hide excluded programs</dd>
               <dt><kbd>J</kbd></dt><dd>Join programs last or mixed in</dd>
               <dt><kbd>a</kbd></dt><dd>Application: none, applied, accepted, rejected</dd>
+              <dt><kbd>f</kbd></dt><dd>Findings for the selected program, with hours and €/h</dd>
+              <dt><kbd>T</kbd></dt><dd>Start a timer for the active program, or stop it</dd>
             </dl>
             <dl>
               <dt>Scope guard</dt><dd></dd>

@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
  * program (`u`), open Burp through the guard (`b`), stop it (`g`), and the last refusals.
  * FE-8 (§12.4): a shell in the guard container (`t`) and the Claude copilot (`h`), active program only.
  * FE-9 (§13.4): the access check (`v`) has the same gate.
+ * FE-10 (§14.3): the timer (`T`) reports on the guard line.
  */
 export type GuardStatus = {
   running: boolean;
@@ -204,6 +205,12 @@ export function setupGuard(opts: {
     if (error.startsWith("Can't open")) { error = ""; draw(); }
     return true;
   }
+  /** A message on the guard line (the timer's errors); "" clears the last one. */
+  function say(text: string) {
+    confirming = null;
+    error = text;
+    draw();
+  }
   const shell = () => work("bounty_open_shell", "the shell");
   const hunter = () => work("bounty_open_hunter", "the Claude copilot");
 
@@ -224,7 +231,7 @@ export function setupGuard(opts: {
   draw();
   return {
     active,
-    use, stop, burp, shell, hunter, toggleRefusals, gate,
+    use, stop, burp, shell, hunter, toggleRefusals, gate, say,
     /** Esc: close the popover or cancel a pending switch. True when it did something. */
     escape() {
       if (confirming) { confirming = null; draw(); return true; }
