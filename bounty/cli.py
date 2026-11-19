@@ -118,6 +118,8 @@ def build_parser():
     rp.add_argument("--domain", help="query this base domain instead of every in-scope wildcard")
     rm = rcs.add_parser("map", help="httpx + katana on the ACTIVE program's in-scope hosts, through the guard")
     rm.add_argument("--limit", type=int, metavar="N", help="map at most N hosts")
+    rm.add_argument("--all", action="store_true", help="also hosts mapped in the last 7 days (default: skip them, so m resumes)")
+    rcs.add_parser("stop", help="stop a running map or exposure check (keeps what it found)")
     rx = rcs.add_parser("exposures", help="curated checks (.git, .env, dumps, actuator…) on the ACTIVE program's live hosts")
     rx.add_argument("--limit", type=int, metavar="N", help="check at most N hosts")
     rl = rcs.add_parser("list", help="hosts ranked by interest")
@@ -391,7 +393,8 @@ def main(argv=None):
         ("burp", None): cmd_burp,
         ("shell", None): lambda a, w: shell_mod.shell(a.handle),
         ("recon", "passive"): lambda a, w: recon_mod.passive(w, a.handle, a.domain),
-        ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit),
+        ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit, redo_all=a.all),
+        ("recon", "stop"): lambda a, w: recon_mod.stop_cmd(),
         ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
         ("recon", "exposures"): lambda a, w: recon_mod.exposures_cmd(w, a.limit),
         ("program", "browse"): cmd_browse,

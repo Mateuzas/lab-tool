@@ -88,7 +88,7 @@ followed or top-25 programs; bounty raised; rules changed or program suspended/c
 | `j` `k`, `Home` `End` `G` | move |
 | `Enter` / `o` | show the host's URL (the app never opens it itself: paste it into Burp's browser, which goes through the guard) |
 | `y` | copy that URL |
-| `m` | map the active program, with progress; one map at a time |
+| `m` | map the active program, most interesting hosts first, with progress; one map at a time. Press `m` again while it runs to **stop** (what it found is kept); later `m` resumes, skipping hosts mapped in the last 7 days (`recon map --all` redoes them) |
 | `e` | check exposures on the hosts a map found live (kali-lab's 13 curated checks: `.git`, `.env`, SQL dumps, actuator, API definitions…), same rules as `m`; a hit shows a filled **exposed** chip (hover it for the checks) |
 | `x` | show / hide out-of-scope and not-in-scope hosts |
 | `l` / `Esc` | close |

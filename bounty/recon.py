@@ -425,12 +425,42 @@ def list_cmd(ws, handle, as_json=False, out=sys.stdout):
 
 # -- map ---------------------------------------------------------------------------------------
 
-def map_args(container, handle, limit=None, script="bounty-map"):
+def map_args(container, handle, limit=None, script="bounty-map", redo_all=False):
     args = ["exec", "-e", "BOUNTY_HANDLE=" + handle, "-w", "%s/%s" % (shell.WORK, handle),
             container, "bounty-run", "--actor", "human", "--", script]
     if limit:
         args += ["--limit", str(int(limit))]
+    if redo_all and script == "bounty-map":
+        args.append("--all")
     return args
+
+
+def write_map_order(ws, handle):
+    """recon/map-order.json: in-scope hosts by interest, so a map (and a stopped one) covers the
+    most promising hosts first."""
+    try:
+        rs = rows(ws, handle)
+    except BountyError:
+        return
+    write_json(os.path.join(recon_dir(ws, handle), "map-order.json"),
+               {"hosts": [r["host"] for r in rs if r["scope"] == "in-scope"]})
+
+
+STOP_PATTERN = "bounty-(map|exposures)"
+
+
+def stop_cmd(out=sys.stdout):
+    """Stop a running map or exposure check (SIGTERM: it saves what it has). Exit 0 stopped, 1 none."""
+    cfg = guard._cfg()
+    if not guard.running(cfg["container"]):
+        raise BountyError("guard", "%s is not running" % cfg["container"], 3)
+    code, _, _ = guard._docker(["exec", "-u", "root", cfg["container"], "pkill", "-TERM", "-u", "hunter",
+                                "-f", STOP_PATTERN])
+    if code == 0:
+        out.write("stopped: what was mapped so far is kept; m (or recon map) resumes\n")
+        return 0
+    out.write("nothing running\n")
+    return 1
 
 
 def automation_allowed(profile):
@@ -439,7 +469,7 @@ def automation_allowed(profile):
     return not (rules.get("automation") == "forbidden" or rps == 0)
 
 
-def map_cmd(ws, limit=None, run=subprocess.call, script="bounty-map"):
+def map_cmd(ws, limit=None, run=subprocess.call, script="bounty-map", redo_all=False):
     """Active mapping of the guard's active program (CONTRACTS §10.2), or with script
     bounty-exposures the curated exposure checks (§10.6). Exit: the script's own code;
     3 guard not running; 5 no active program; 6 the program forbids automated tools."""
@@ -454,7 +484,9 @@ def map_cmd(ws, limit=None, run=subprocess.call, script="bounty-map"):
         raise BountyError("automation-forbidden",
                           "%s forbids automated tools: check it by hand in Burp" % handle, 6)
     guard._docker(shell.mkdir_args(cfg["container"], handle), check=True)
-    return run(["docker"] + map_args(cfg["container"], handle, limit, script))
+    if script == "bounty-map":
+        write_map_order(ws, handle)
+    return run(["docker"] + map_args(cfg["container"], handle, limit, script, redo_all))
 
 
 def exposures_cmd(ws, limit=None, run=subprocess.call):

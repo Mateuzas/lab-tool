@@ -2,7 +2,9 @@
 No network: crt.sh and the resolver are fakes; hosts are .test names."""
 
 import datetime
+import importlib.util
 import io
+import time
 import json
 import os
 import shutil
@@ -233,6 +235,32 @@ class List(Base):
         self.assertEqual(json.loads(out.getvalue()), [])
 
 
+def _bounty_map():
+    import importlib.machinery
+    import sys
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    sys.path.insert(0, os.path.join(root, "container", "share", "bounty"))
+    loader = importlib.machinery.SourceFileLoader("bounty_map", os.path.join(root, "container", "bin", "bounty-map"))
+    spec = importlib.util.spec_from_loader("bounty_map", loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    return m
+
+
+class MapOrder(unittest.TestCase):
+    def test_interest_order_then_skip_fresh(self):
+        bm = _bounty_map()
+        todo = [("a.acme.test", None), ("b.acme.test", None), ("c.acme.test", None), ("d.acme.test", None)]
+        now = 1_800_000_000
+        mapped = {"b.acme.test": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600)),        # fresh
+                  "c.acme.test": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 30 * 86400))}  # stale
+        got, skipped = bm.order_and_skip(todo, ["c.acme.test", "b.acme.test"], mapped, False, now)
+        self.assertEqual([t[0] for t in got], ["c.acme.test", "a.acme.test", "d.acme.test"])
+        self.assertEqual(skipped, 1)
+        got, skipped = bm.order_and_skip(todo, ["c.acme.test", "b.acme.test"], mapped, True, now)
+        self.assertEqual(([t[0] for t in got], skipped), (["c.acme.test", "b.acme.test", "a.acme.test", "d.acme.test"], 0))
+
+
 class Map(Base):
     def test_args(self):
         self.assertEqual(recon.map_args("kali-bounty", "test-acme", 5),
@@ -247,6 +275,24 @@ class Map(Base):
                 mock.patch.object(recon.guard, "_docker", return_value=(0, "", "")):
             code = recon.map_cmd(self.ws, run=lambda a: ran.append(a) or 0)
         return code, ran
+
+    def test_all_flag_and_order_file(self):
+        self.assertEqual(recon.map_args("kali-bounty", "test-acme", None, redo_all=True)[-1], "--all")
+        self.assertNotIn("--all", recon.map_args("kali-bounty", "test-acme", None, "bounty-exposures", True))
+        self.put("hosts.jsonl", [{"host": "admin.acme.test", "scope": "in-scope", "first_seen": "2026-01-01T00:00:00Z"},
+                                 {"host": "www.acme.test", "scope": "in-scope", "first_seen": "2026-01-01T00:00:00Z"}])
+        self._map()
+        with open(os.path.join(self.rdir(), "map-order.json")) as f:
+            self.assertEqual(json.load(f)["hosts"][0], "admin.acme.test")
+
+    def test_stop(self):
+        with mock.patch.object(recon.guard, "running", return_value=True), \
+                mock.patch.object(recon.guard, "_docker", return_value=(0, "", "")) as d:
+            self.assertEqual(recon.stop_cmd(out=io.StringIO()), 0)
+        self.assertEqual(d.call_args[0][0][-6:], ["pkill", "-TERM", "-u", "hunter", "-f", recon.STOP_PATTERN])
+        with mock.patch.object(recon.guard, "running", return_value=True), \
+                mock.patch.object(recon.guard, "_docker", return_value=(1, "", "")):
+            self.assertEqual(recon.stop_cmd(out=io.StringIO()), 1)
 
     def test_guard_down_exits_3(self):
         with self.assertRaises(BountyError) as cm:

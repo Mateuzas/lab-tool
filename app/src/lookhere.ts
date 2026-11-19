@@ -104,6 +104,10 @@ export function setupLookHere(opts: {
   }
 
   async function runMap(kind: Job = "map") {
+    if (map && map.handle === handle && map.kind === kind) {   // the same key again: stop it
+      try { await invoke("bounty_recon_stop"); } catch (e) { mapError = String(e); draw(); }
+      return;
+    }
     if (map || mapBlocked() || !handle) return;
     if (kind === "exposures" && !rows.some((r) => r.live)) {
       mapError = "No live hosts yet: press m to map first, then e.";
@@ -178,12 +182,13 @@ export function setupLookHere(opts: {
       ["lh-exp", "exposures", "Exposures", "Checking…", "e"]] as const) {
       const b = $<HTMLButtonElement>(id);
       const running = mine && map?.kind === kind;
-      b.disabled = !!blocked || mine;
+      b.disabled = !!blocked || (mine && !running);   // the running one stays pressable: it stops
       b.classList.toggle("spinning", running);
       b.toggleAttribute("aria-busy", running);
       const kb = el("kbd", "", key);
       kb.setAttribute("aria-hidden", "true");
-      b.replaceChildren(el("span", "", running ? busy : label), kb);
+      b.replaceChildren(el("span", "", running ? `${busy} Stop` : label), kb);
+      b.title = running ? "Stop: keeps what was found so far; press again later to resume" : "";
     }
     const ml = $("lh-map-line");
     let mt = "", kind = "";
