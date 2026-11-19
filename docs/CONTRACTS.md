@@ -619,3 +619,27 @@ findings: {status: n}, payout_eur, eur_per_hour}` (payouts from the findings' `p
 €/h when there's no time), sorted by €/h then hours. Times are UTC; a session that spans the
 `--since` cut counts only its part inside the window.
 
+### 14.3 App (FE-10)
+| Command | Runs | Returns |
+|---|---|---|
+| `bounty_findings(handle: Option<String>)` | `finding list --json [--handle H]` | `Finding[]`: `{id, program, title, severity, status, flows, created, payout_eur}` |
+| `bounty_finding_new(slug, title, handle)` | `finding new <slug> [--title T] --handle H` | `()` |
+| `bounty_finding_open(id)` | opens `workspace/bounty/findings/<id>/finding.md` in the default text editor (`open -t <path>`) after checking id `^[a-z0-9][a-z0-9-]{0,190}$` and that the file exists | `()` |
+| `bounty_time_status()` | `time status --json` | `{running: {handle, start, note, seconds} \| null, today_seconds}` |
+| `bounty_time_start(note: Option<String>)` | `time start [note]` (the guard's active program) | `()` then emits `bounty-time-updated` |
+| `bounty_time_stop()` | `time stop` | `()` then emits `bounty-time-updated` |
+| `bounty_time_report(since_days)` | `time report --json --since D` | `{since_days, programs: [{handle, name, hours, sessions, findings: {status: n}, payout_eur, eur_per_hour}], totals: {hours, payout_eur, paid_eur_api, payouts_api, eur_per_hour}}` (`paid_eur_api`/`payouts_api` come from Intigriti payouts; null when never synced) |
+
+Validation in Rust before running anything: slug `^[a-z0-9][a-z0-9-]{0,59}$`, handle
+`^[a-z0-9][a-z0-9-]{0,127}$`, note and title one line of at most 200 characters. Exit 64 → the CLI's
+`bounty: usage:` message; others → the generic failure text (`failure()`).
+
+UI: **`T`** starts a timer for the guard's active program (no note) or stops the running one; a
+compact header chip next to the guard indicator shows `⏱ 1h12 · <program name>` while running (ticks
+each minute; click = stop). Disabled with a tooltip when nothing runs and no program is active.
+**`f`** opens the **Findings** panel for the selected program row: a summary line (hours, findings by
+status, € paid, €/h for that program; and the all-programs €/h from totals), the findings table
+(status, severity, id, title, flows, €), `j/k`, `Enter`/`o` opens the finding in the editor, `n` new
+finding (dialog: slug + title; creates it for that program, then opens it), `a` toggles all programs,
+`Esc` closes. Keys in the `?` overlay and footer strip. Empty state: "No findings for <program> yet.
+Press n to start one, or ask Claude (h) to draft one."
