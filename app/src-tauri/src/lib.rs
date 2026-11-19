@@ -203,6 +203,12 @@ async fn bounty_recon_map(app: AppHandle, on_event: Channel<bounty::SyncEvent>, 
     state.recon_map(app, on_event).await
 }
 
+/// Stop a running map or exposure check (CONTRACTS §10.2); results so far are kept.
+#[tauri::command]
+async fn bounty_recon_stop() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(bounty::recon_stop).await.map_err(|e| e.to_string())?
+}
+
 /// Curated exposure checks on the active program's live hosts, through the guard (CONTRACTS §10.6).
 #[tauri::command]
 async fn bounty_recon_exposures(app: AppHandle, on_event: Channel<bounty::SyncEvent>, state: State<'_, bounty::Bounty>) -> Result<(), String> {
@@ -339,7 +345,7 @@ pub fn run() {
             bounty_ranking, bounty_refresh, open_program,
             bounty_guard_status, bounty_use, bounty_guard_stop, bounty_open_burp, bounty_alert_state,
             bounty_set_application, bounty_manual_list, bounty_open_shell, bounty_open_hunter,
-            bounty_recon_list, bounty_recon_map, bounty_recon_exposures,
+            bounty_recon_list, bounty_recon_map, bounty_recon_exposures, bounty_recon_stop,
             bounty_ac_status, bounty_ac_set_session, bounty_ac_clear_session, bounty_ac_candidates,
             bounty_ac_replay, bounty_ac_results,
             bounty_findings, bounty_finding_new, bounty_finding_open,

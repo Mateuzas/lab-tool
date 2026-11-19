@@ -3,7 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 
 /**
  * The time tracker in the Programs header (FE-10, docs/CONTRACTS.md §14.3): `T` starts a timer for
- * the guard's active program or stops the running one; the chip shows `1h12 · Dropbox` while it runs.
+ * the guard's active program or stops the running one; the chip shows `1h12` while it runs (plus the
+ * program's name only when it isn't the one the guard has loaded).
  * The CLI owns the clock (time-open.json); the chip only counts on from the last status it read.
  */
 export type TimeStatus = {
@@ -42,8 +43,10 @@ export function setupTimer(opts: {
     chip.dataset.state = r ? "running" : "idle";
     chip.setAttribute("aria-pressed", String(!!r));
     if (r) {
+      // The guard chip next to it already names the program; repeat it only when they differ.
+      const other = r.handle !== opts.active();
       label.replaceChildren(Object.assign(document.createElement("b"), { textContent: hm(elapsed()) }),
-        Object.assign(document.createElement("span"), { className: "t-name", textContent: `· ${opts.nameOf(r.handle)}` }));
+        ...(other ? [Object.assign(document.createElement("span"), { className: "t-name", textContent: `· ${opts.nameOf(r.handle)}` })] : []));
       const since = new Date(r.start);
       const at = isNaN(since.getTime()) ? "" : ` since ${since.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}`;
       const today = status ? `\nToday ${hm(status.today_seconds + (performance.now() - readAt) / 1000)}` : "";

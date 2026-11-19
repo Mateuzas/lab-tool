@@ -1,5 +1,5 @@
 #!/usr/bin/python3 -I
-"""bounty-map [--limit N]   (CONTRACTS §10.2; started by `host/bounty recon map` through
+"""bounty-map [--limit N] [--all]   (CONTRACTS §10.2; started by `host/bounty recon map` through
 `bounty-run --actor human`, so it runs as hunter in /bounty/work/<handle>)
 
 Maps the guard's active program: for each in-scope host, httpx-toolkit (status, title, tech,
@@ -9,7 +9,9 @@ live ones. One host at a time, both tools at the program's rate, every request t
 checks scope, rate and identification and logs each request.
 
 Targets: the program's in-scope `domain` / `url` entries, then the in-scope hosts that resolved in
-recon/hosts.jsonl (`recon passive`). Each one is checked with the guard's own matcher first.
+recon/hosts.jsonl (`recon passive`). Each one is checked with the guard's own matcher first. Order:
+recon/map-order.json (hosts by interest, written by `recon map`) when present. Hosts mapped in the
+last FRESH_DAYS are skipped unless --all, so pressing m again resumes a stopped map.
 
 Writes recon/live.jsonl (one record per probed URL, replacing the host's older ones),
 recon/urls.jsonl (merged) and recon/mapped.json. Progress on stderr:
@@ -18,6 +20,7 @@ Exit: 0 done (also when some hosts didn't answer); 6 the guard refused the tools
 (automation-forbidden); 64 usage; 1 nothing to map.
 """
 
+import calendar
 import json
 import os
 import signal
@@ -37,6 +40,7 @@ WORK = "/bounty/work"
 DEPTH = 2
 MAX_URLS = 300
 CRAWL_TIME = "5m"
+FRESH_DAYS = 7
 HTTPX_TIMEOUT = 120
 # Per request, above the guard's rate-limit queue (up to 10 s), so queued requests aren't lost.
 TOOL_TIMEOUT = 15
@@ -202,13 +206,38 @@ def stop(_sig, _frame):
     raise KeyboardInterrupt
 
 
+def order_and_skip(todo, order, mapped, redo_all, now_ts=None):
+    """Interest order (hosts in `order` first, in that order; the rest keep theirs), then drop hosts
+    mapped within FRESH_DAYS unless redo_all. -> (todo, skipped count)."""
+    rank = {h: i for i, h in enumerate(order or [])}
+    todo = sorted(todo, key=lambda t: rank.get(t[0], len(rank)))
+    if redo_all:
+        return todo, 0
+    now_ts = now_ts or time.time()
+    fresh = set()
+    for h, ts in (mapped or {}).items():
+        try:
+            t = calendar.timegm(time.strptime(ts, "%Y-%m-%dT%H:%M:%SZ"))
+        except (TypeError, ValueError):
+            continue
+        if now_ts - t < FRESH_DAYS * 86400:
+            fresh.add(h)
+    kept = [t for t in todo if t[0] not in fresh]
+    return kept, len(todo) - len(kept)
+
+
 def main(argv):
-    limit = None
-    if argv[:1] == ["--limit"] and len(argv) == 2 and argv[1].isdigit():
-        limit = int(argv[1])
-    elif argv:
-        sys.stderr.write("usage: bounty-map [--limit N]\n")
-        return 64
+    limit, redo_all = None, False
+    args = list(argv)
+    while args:
+        a = args.pop(0)
+        if a == "--all":
+            redo_all = True
+        elif a == "--limit" and args and args[0].isdigit():
+            limit = int(args.pop(0))
+        else:
+            sys.stderr.write("usage: bounty-map [--limit N] [--all]\n")
+            return 64
     handle = os.environ.get("BOUNTY_HANDLE") or ""
     if not gp.HANDLE_RE.match(handle):
         sys.stderr.write("bounty: usage: BOUNTY_HANDLE is not set (run it through host/bounty recon map)\n")
@@ -223,11 +252,28 @@ def main(argv):
     d = os.path.join(WORK, handle, "recon")
     os.makedirs(d, exist_ok=True)
     todo = targets(profile, policy, read_jsonl(os.path.join(d, "hosts.jsonl")))
-    if limit:
-        todo = todo[:limit]
     if not todo:
         log("nothing: no in-scope hosts to map (run recon passive first for wildcard programs)")
         return 1
+    try:
+        with open(os.path.join(d, "map-order.json"), encoding="utf-8") as f:
+            order = json.load(f).get("hosts") or []
+    except (OSError, ValueError, AttributeError):
+        order = []
+    try:
+        with open(os.path.join(d, "mapped.json"), encoding="utf-8") as f:
+            already = json.load(f).get("hosts") or {}
+    except (OSError, ValueError, AttributeError):
+        already = {}
+    todo, skipped = order_and_skip(todo, order, already, redo_all)
+    if skipped:
+        log("skip: %d hosts mapped in the last %d days (--all maps them again)" % (skipped, FRESH_DAYS))
+    if limit:
+        todo = todo[:limit]
+    if not todo:
+        log("progress: 0/0 every host was mapped in the last %d days" % FRESH_DAYS)
+        print("%s: nothing new to map (all mapped in the last %d days; recon map --all redoes them)" % (handle, FRESH_DAYS))
+        return 0
     rl = rate(profile)
     signal.signal(signal.SIGTERM, stop)
 

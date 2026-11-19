@@ -455,6 +455,18 @@ n=$(echo "$new" | python3 -c 'import json,sys; print(sum(1 for l in sys.stdin if
 expect "$n" 0 "map sent nothing towards out-of-scope / not-in-scope names"
 got=$(host/bounty recon list test-acme --json | jget '[(r["host"], r["live"]) for r in d if r["host"]=="app.acme.test"]')
 expect "$got" "[('app.acme.test', True)]" "recon list shows the mapped host as live"
+host/bounty recon map >"$WS/map2.out" 2>&1; rc=$?
+grep -q "nothing new to map" "$WS/map2.out" && [ "$rc" = 0 ] && check ok "a second map skips hosts mapped in the last 7 days (resume)" || check bad "a second map skips hosts mapped in the last 7 days (rc $rc: $(tail -1 "$WS/map2.out"))"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["hosts"] else 1)' "$WS/work/test-acme/recon/map-order.json" \
+  && check ok "recon map writes the interest order for bounty-map" || check bad "recon map writes the interest order for bounty-map"
+host/bounty recon map --all >"$WS/map3.out" 2>&1 &
+mp=$!
+for _ in $(seq 1 20); do docker exec "$C" pgrep -u hunter -f bounty-map >/dev/null && break; sleep 0.5; done
+sleep 1
+host/bounty recon stop >/dev/null 2>&1; rc=$?
+wait $mp; mrc=$?
+expect "$rc $mrc" "0 130" "recon stop ends a running map (it exits 130 and keeps what it had)"
+docker exec "$C" pgrep -u hunter -f bounty-map >/dev/null && check bad "no map left running after stop" || check ok "no map left running after stop"
 
 echo "== (q) two-account access-control check (CONTRACTS §13)"
 use test-acme

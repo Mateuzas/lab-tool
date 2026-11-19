@@ -442,7 +442,12 @@ followed) with `-irh`, so a guard refusal (`X-Bounty-Guard: refused; reason=…`
 `status: null, refused: <reason>` instead of a live 403; katana `-fs fqdn` (never leaves the host),
 5 min per host. `recon/mapped.json` `{"hosts":{host: ts}}` records what was probed. Results are saved
 after every host, also on interrupt. `bounty-map` exit: 0; 1 nothing to map; 6 the guard refused the
-tools (automation-forbidden); 130 interrupted. `recon map` exit: bounty-map's; 3 guard not running;
+tools (automation-forbidden); 130 interrupted.
+Map control (2026-11-19): `recon map` writes `recon/map-order.json` (in-scope hosts by interest) and
+`bounty-map` follows it, so the most promising hosts go first; hosts mapped in the last 7 days are
+skipped unless `--all`, so pressing `m` again resumes a stopped map. `recon stop` (Tauri
+`bounty_recon_stop`; in the look-here panel the running job's key again) sends SIGTERM to a running
+map or exposure check, which saves what it has and exits 130. `recon map` exit: bounty-map's; 3 guard not running;
 5 no active program; 6 the profile forbids automation (checked before anything is sent).
 
 ### 10.3 The list

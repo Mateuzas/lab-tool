@@ -330,6 +330,7 @@ async function bountyRefresh(channel: { id: number }) {
     if (cmd === "bounty_ranking") { await sleep(progMode === "loading" ? 60000 : 40); return ranking(); }
     if (cmd === "bounty_refresh") return bountyRefresh(args.onEvent as unknown as { id: number });
     if (cmd === "bounty_recon_list") { await sleep(60); return reconList(args.handle); }
+    if (cmd === "bounty_recon_stop") return null;
     if (cmd === "bounty_recon_map" || cmd === "bounty_recon_exposures") {
       if (guard.status !== "active") throw "bounty: guard: no active program (exit 5)";
       return reconMap(args.onEvent as unknown as { id: number });

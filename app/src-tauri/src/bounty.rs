@@ -313,6 +313,24 @@ pub fn needs_passive(handle: &str) -> bool {
             .unwrap_or(false)
 }
 
+/// `recon stop`: SIGTERM to a running map / exposure check (it keeps what it found). A run that
+/// already ended is not an error.
+pub fn recon_stop() -> Result<(), String> {
+    let repo = repo_dir()?;
+    let out = cli(&repo, "host/bounty", &["recon", "stop"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    match out.status.code() {
+        Some(0) | Some(1) => Ok(()),
+        _ => {
+            let lines: Vec<String> = String::from_utf8_lossy(&out.stderr).lines().map(str::to_string).collect();
+            Err(err_text(failure(&lines, "recon stop", out.status)))
+        }
+    }
+}
+
 pub fn recon_list(handle: &str) -> Result<Vec<ReconRow>, String> {
     if !handle_ok(handle) {
         return Err("Not a program handle.".into());
@@ -341,7 +359,8 @@ fn recon_map_blocking(sub: &str, on_progress: &dyn Fn(SyncEvent)) -> Result<(), 
         }
     }
     let status = child.wait().map_err(|e| ("failed".to_string(), e.to_string()))?;
-    if !status.success() {
+    // 130: stopped on purpose (recon stop); what it found is saved, so it's not a failure.
+    if !status.success() && status.code() != Some(130) {
         return Err(failure(&lines, &format!("recon {sub}"), status));
     }
     Ok(())
