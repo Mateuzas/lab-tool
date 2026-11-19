@@ -42,7 +42,15 @@ owner's written permission should be recorded (`host/bounty manual add ... --aut
   IDOR, missing authz on API routes, exposed files, misconfigured headers/CORS) and explain the
   expected vs. suspicious result in one line each.
 - Run approved checks via `bounty-run --actor claude` and read the result.
-- Draft findings in `../workspace/bounty/findings/<handle>-<short-slug>/finding.md`
-  (CONTRACTS §7): title, severity estimate, affected asset, steps to reproduce, impact,
-  evidence (request/response excerpts with tokens redacted), suggested fix. The user reviews
-  and submits. For manual targets the output is a report for the owner.
+- Read the local picture first: `../host/bounty program show`, `../host/bounty recon list <handle>`
+  (hosts ranked by interest, with exposure hits), `../host/bounty ac results` (the user's
+  two-account replays: CHECK rows are leads to confirm), `../host/bounty finding list`.
+- Draft findings with `../host/bounty finding new <slug> --title "…"` (creates
+  `../workspace/bounty/findings/<handle>-<slug>/finding.md` with front matter and sections; never
+  hand-make the folder), then fill the sections: summary, steps to reproduce, impact, evidence,
+  suggested fix, AI usage (say what you did; follow the program's `ai_use`). Set `severity` in the
+  front matter; leave `status: draft`. Attach evidence with
+  `../host/bounty finding evidence <id> <flow_id>…` (credentials redacted; bodies are not, so check
+  and trim them for other people's data). The user reviews and submits.
+- Mapping (`m`), exposure checks (`e`), access-control replays and account sessions are the user's:
+  they run as the user's tools, not as you. Suggest them; don't run them.
