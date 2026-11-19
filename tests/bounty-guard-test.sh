@@ -20,6 +20,13 @@ T=kali-bounty-test-target
 NET=kali-bounty-testnet
 NETI=kali-bounty-testnet-int
 PORT=18081
+# Docker Desktop (macOS) maps bind-mount ownership to the Mac user, so the workspace this script
+# writes and hunter (uid 1000 in the image) writes look like one owner. Docker on Linux keeps real
+# uids: the suite only works there when it runs as uid 1000 (CI does: .github/workflows/ci.yml).
+if [ "$(uname -s)" = Linux ] && [ "$(id -u)" != 1000 ]; then
+  echo "on Linux run this as uid 1000 (the image's hunter), not uid $(id -u): hunter must own the bind-mounted workspace" >&2
+  exit 2
+fi
 mkdir -p "$ROOT/workspace"
 WS=$(mktemp -d "$ROOT/workspace/.guard-test.XXXXXX")
 VOL=kali-bounty-test-guard

@@ -90,10 +90,22 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+      # Docker on Linux keeps real uids on bind mounts (Docker Desktop on the Mac maps them to the
+      # Mac user). The suite's workspace is shared with the container's hunter (uid 1000), so run it
+      # as uid 1000 from a copy of the checkout that user owns, like the Mac user owns the clone.
+      - name: Prepare a uid 1000 user and checkout copy
+        run: |
+          user=$(getent passwd 1000 | cut -d: -f1 || true)
+          if [ -z "$user" ]; then sudo useradd -u 1000 -m guardtest; user=guardtest; fi
+          sudo usermod -aG docker "$user"
+          sudo mkdir -p /srv/kali-lab
+          sudo cp -a . /srv/kali-lab/
+          sudo chown -R 1000:1000 /srv/kali-lab
+          echo "GUARD_USER=$user" >> "$GITHUB_ENV"
       - name: Run the suite
         run: |
           set -o pipefail
-          tests/bounty-guard-test.sh 2>&1 | tee guard-test.log
+          sudo -u "$GUARD_USER" -H env PATH="$PATH" bash -c 'cd /srv/kali-lab && tests/bounty-guard-test.sh' 2>&1 | tee guard-test.log
       - name: Upload the suite log
         if: failure()
         uses: actions/upload-artifact@v4
