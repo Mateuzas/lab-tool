@@ -137,6 +137,8 @@ connect.
 | `recon map [--limit N]` | httpx-toolkit + katana on the active program's in-scope hosts, through the guard, at the program's rate. Exit 3 guard not running, 5 no active program, 6 the program forbids automation |
 | `recon exposures [--limit N]` | the 13 curated exposure checks on the active program's live hosts (map first), through the guard as `tool:nuclei`; no response bodies kept. Same exit codes as `recon map` |
 | `recon list H [--json]` | the look-here list |
+| `program browse [--handle H]` | hosts your own browsing hit that aren't in scope (the site's CDN, its login), and the ones you approved |
+| `program browse allow HOST… [--any-method]` / `remove HOST…` | approve a host for **your own** browsing only (GET/HEAD/OPTIONS; `--any-method` for login hosts that need POST). Tools, maps, replays and Claude stay refused; out-of-scope hosts can't be approved. Applies within seconds |
 | `program show [H] [--json]` | one program at a glance: scope, rules, legal basis (and whether the owner's written note is recorded), recon, findings, time; default the active program |
 | `finding new <slug> [--title T] [--handle H]` | a draft at `findings/<handle>-<slug>/finding.md` with front matter and the report sections |
 | `finding list [--handle H] [--json]` | your findings, newest first (older drafts without front matter are read too) |

@@ -7,6 +7,7 @@ import sys
 
 from bounty import ac as ac_mod
 from bounty import applications
+from bounty import browse as browse_mod
 from bounty import findings as findings_mod
 from bounty import payouts as payouts_mod
 from bounty import show as show_mod
@@ -84,6 +85,13 @@ def build_parser():
     psh = prs.add_parser("show", help="one program at a glance: scope, rules, legal basis, recon, findings, time")
     psh.add_argument("handle", nargs="?", help="default: the guard's active program")
     psh.add_argument("--json", action="store_true")
+    pb = prs.add_parser("browse", help="hosts the program's site needs but aren't in scope: approve them "
+                                       "for your own browsing only (CONTRACTS §3.5)")
+    pb.add_argument("action", nargs="?", choices=("allow", "remove"), help="omit to list approved hosts and candidates")
+    pb.add_argument("hosts", nargs="*", metavar="HOST")
+    pb.add_argument("--any-method", action="store_true", help="also POST/PUT… (login hosts); default GET/HEAD/OPTIONS")
+    pb.add_argument("--handle", help="default: the guard's active program")
+    pb.add_argument("--json", action="store_true")
     ap = prs.add_parser("apply-state", help="record where your application to a private program stands")
     ap.add_argument("handle")
     ap.add_argument("state", help="applied | accepted | rejected | withdrawn | none (clear)")
@@ -223,6 +231,18 @@ def _intigriti(progs):
     """Ranking, counts and the Intigriti sync ignore manual targets (CONTRACTS §2, legal_basis
     "authorization"): a manual profile has no platform_id and is never sent to the API."""
     return [p for p in progs if (p.get("platform") or "intigriti") == "intigriti"]
+
+
+def cmd_browse(args, ws):
+    if args.action is None:
+        if args.hosts:
+            raise BountyError("usage", "to approve: program browse allow HOST…", 64)
+        return browse_mod.list_cmd(ws, args.handle, args.json)
+    if not args.hosts:
+        raise BountyError("usage", "give at least one HOST", 64)
+    if args.action == "allow":
+        return browse_mod.allow(ws, args.hosts, args.any_method, args.handle)
+    return browse_mod.remove(ws, args.hosts, args.handle)
 
 
 def cmd_payouts_sync(args, ws):
@@ -374,6 +394,7 @@ def main(argv=None):
         ("recon", "map"): lambda a, w: recon_mod.map_cmd(w, a.limit),
         ("recon", "list"): lambda a, w: recon_mod.list_cmd(w, a.handle, a.json),
         ("recon", "exposures"): lambda a, w: recon_mod.exposures_cmd(w, a.limit),
+        ("program", "browse"): cmd_browse,
         ("program", "show"): lambda a, w: show_mod.show(w, a.handle, a.json),
         ("payouts", "sync"): cmd_payouts_sync,
         ("time", "start"): lambda a, w: time_mod.start(w, a.note, a.handle),
