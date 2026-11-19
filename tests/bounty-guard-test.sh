@@ -143,6 +143,9 @@ INTIGRITI_USERNAME=tester host/bounty program use test-acme; rc=$?
 expect "$rc" 0 "program use test-acme"
 state() { as_root cat $VAR/guard.json | jget "$1"; }
 wait_state() { for _ in $(seq 1 20); do [ "$(state "$1")" = "$2" ] && return 0; sleep 0.5; done; return 1; }
+# Poll guard.json until the expression has the expected value (a read can come back empty while the
+# container is busy), then check it once more: the assertion is exact, only the timing is tolerant.
+expect_state() { wait_state "$1" "$2"; expect "$(state "$1")" "$2" "$3"; }
 wait_state 'd["status"]' active
 expect "$(state '(d["status"], d["program"], d["effective_rps"])')" "('active', 'test-acme', 2.0)" "guard.json: active, program, rate"
 for _ in $(seq 1 20); do eg=$(as_root cat $VAR/guard.json | jget 'd.get("egress_ip")'); [ "$eg" != None ] && break; sleep 0.5; done
@@ -239,6 +242,12 @@ expect "$(echo "$echo_json" | jget '[k for k in d["headers"] if k.lower()=="x-bo
 echo_json=$(body human http://app.acme.test/i2 -H 'User-Agent:' -H 'X-Bounty-Actor: tool:mytool')
 expect "$(echo "$echo_json" | jget '{k.lower(): v for k, v in d["headers"].items()}.get("user-agent")')" "Intigriti - tester - kali-lab" "missing User-Agent becomes kali-lab"
 expect "$(echo "$echo_json" | jget '[k for k in d["headers"] if k.lower()=="x-bounty-actor"]')" "[]" "X-Bounty-Actor stripped on plain http too"
+
+echo "== keep-alive: many requests on one client connection (upstream connections don't pile up)"
+# Before the fix every request left an idle upstream connection open; the fake target (like servers
+# that cap connections) stopped answering after 5 and every 6th request hung.
+got=$(docker exec "$C" bounty-run --actor human -- sh -c 'u=""; for i in $(seq 1 12); do u="$u -o /dev/null https://app.acme.test/ka-$i"; done; curl -s --http1.1 -m 15 -w "%{http_code} " $u')
+expect "$(echo $got)" "200 200 200 200 200 200 200 200 200 200 200 200" "12 keep-alive HTTP/1.1 requests through the guard all answered"
 
 echo "== tools through bounty-run (proxy flag + actor header injected)"
 as_root sh -c 'printf "t1\nt2\n" > /home/hunter/words && chown hunter /home/hunter/words'
@@ -359,7 +368,8 @@ expect "$got" "403 out-of-scope" "host that just left scope refused without a ma
 python3 -c "import sys; sys.exit(0 if $secs <= 12 else 1)" && check ok "picked up within ~10 s" || check bad "picked up within ~10 s (${secs}s)"
 expect "$(req human https://app.acme.test/n3)" "200 " "rest of the scope still allowed, identification kept"
 wait_state 'd["scope_version"]' 2
-expect "$(state '[(r["trigger"], r["from"]["scope_version"], r["to"]["scope_version"], r["result"]) for r in d["reloads"]][-1]')" \
+# Only the newest record: older ones include failed reloads, whose "to" is {} (no scope_version).
+expect_state '(lambda r: (r["trigger"], r["from"].get("scope_version"), r["to"].get("scope_version"), r["result"]))(d["reloads"][-1])' \
        "('program.json changed', '1', '2', 'active')" "reload logged in guard.json reloads (scope 1 -> 2)"
 edit_profile 'p["rules"]["request_header"] = "X-Intigriti-Username: {Nickname}"; p["rules"]["version"] = "2"'
 for _ in $(seq 1 40); do got=$(req human https://app.acme.test/n4); [ "$got" = "403 no-profile" ] && break; sleep 0.5; done

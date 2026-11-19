@@ -39,7 +39,7 @@ MAX_URLS = 300
 CRAWL_TIME = "5m"
 HTTPX_TIMEOUT = 120
 # Per request, above the guard's rate-limit queue (up to 10 s), so queued requests aren't lost.
-TOOL_TIMEOUT = 30
+TOOL_TIMEOUT = 15
 _children = []
 
 
@@ -148,7 +148,7 @@ def probe(host, rl):
     """httpx on one host -> list of live records (status None + refused=<reason> for refusals)."""
     cmd = ["httpx-toolkit", "-u", host, "-j", "-irh", "-sc", "-title", "-td", "-cl", "-location",
            "-fhr", "-silent", "-nc", "-duc", "-rl", str(rl), "-t", "1", "-timeout", str(TOOL_TIMEOUT),
-           "-retries", "0", "-H", "X-Bounty-Actor: tool:httpx-toolkit", "-http-proxy", PROXY]
+           "-retries", "1", "-H", "X-Bounty-Actor: tool:httpx-toolkit", "-http-proxy", PROXY]
     out = []
     for line in run_lines(cmd, timeout=HTTPX_TIMEOUT):
         try:
