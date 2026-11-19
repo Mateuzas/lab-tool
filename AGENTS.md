@@ -22,9 +22,9 @@ the protocol's `backend/ frontend/ infra/` folders map onto existing directories
 - `docs/` is the Architect's. If a contract is wrong, report it; don't edit it.
 - Each task gets its own branch (`<area>/<short-name>`) and worktree, and ends with a pull request into
   `main` (`gh pr create`). The Architect reviews and merges. Don't merge your own PR.
-- Before opening a PR: `make lint`, `make app-test` if `app/` changed, `python3 -m unittest discover
-  bounty` if `bounty/` changed, `tests/bounty-guard-test.sh` if the guard or `container/` changed
-  (local listeners only), the tests your task names, and `scripts/secrets.sh check`.
+- Before opening a PR: `make lint`, `make app-test` if `app/` changed, `make test-bounty` if
+  `bounty/`, the guard or `container/` changed (unit tests + `tests/bounty-guard-test.sh`, local
+  listeners only; CI runs both too), the tests your task names, and `scripts/secrets.sh check`.
 - Report back in at most 25 lines: files changed, commands and results, contract deviations, open
   questions, and what you did **not** verify (e.g. "not run against a real program").
 

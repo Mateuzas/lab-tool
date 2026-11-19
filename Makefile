@@ -3,7 +3,7 @@ SHELL := /bin/bash
 SCRIPTS := host/lab container/bin/lab-supervisor container/bin/lab-kill-switch container/bin/lab-shell container/share/lab/bashrc $(wildcard tests/*.sh) $(wildcard scripts/*.sh) container/bin/bounty-firewall container/bin/bounty-guard container/bin/bounty-supervisor container/share/bounty/bashrc
 VPN ?= starting
 
-.PHONY: help build up down status lint secrets-check test test-target clean app-dev app-test app-build app-install app-shots
+.PHONY: help build up down status lint secrets-check test test-bounty test-target clean app-dev app-test app-build app-install app-shots
 
 help: ## list targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -32,6 +32,11 @@ test: lint ## lint + all tests that need no target machine (lab must be connecte
 	tests/shell-log-test.sh
 	tests/snapshot-test.sh
 	tests/session-drop-test.sh
+
+test-bounty: ## Bug bounty: unit tests + scope guard suite (local Docker only, as in CI)
+	python3 -B -m unittest discover -s bounty/tests -t .
+	python3 -B -m unittest tests/test_guard_policy.py
+	tests/bounty-guard-test.sh
 
 test-target: ## kill switch + proxy tests against a spawned machine: make test-target TARGET=10.129.x.x
 	@test -n "$(TARGET)" || { echo "usage: make test-target TARGET=<ip of a machine you spawned>"; exit 1; }
