@@ -514,6 +514,11 @@ A Claude Code project like `tutor/`, written by the Architect (CLAUDE.md, settin
 Claude reads the active profile, flows and work dir, drafts findings, and runs **target traffic
 only as** `docker exec kali-bounty bounty-run --actor claude -- <cmd>`, each command approved by
 the user. WebFetch/WebSearch, curl/wget/nc on the Mac, and Burp's send tools are denied.
+Local, traffic-free commands the copilot may run without asking: `program show`, `recon list`,
+`ac status|candidates|results`, `finding list|new|evidence`, `time status`, `guard status`,
+`flows`, `programs list`. Denied: `recon map|exposures|passive`, `ac session|replay`,
+`programs sync`, `payouts`, `scripts/secrets.sh` (they'd run as the user's tools or need the token).
+Findings are drafted with `finding new` so they carry §7's front matter.
 
 ### 12.3 Tauri commands
 - `bounty_open_shell()` → `()`: Terminal.app `do script` running `<repo>/host/bounty shell`
