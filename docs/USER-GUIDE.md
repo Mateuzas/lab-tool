@@ -137,6 +137,12 @@ connect.
 | `recon map [--limit N]` | httpx-toolkit + katana on the active program's in-scope hosts, through the guard, at the program's rate. Exit 3 guard not running, 5 no active program, 6 the program forbids automation |
 | `recon exposures [--limit N]` | the 13 curated exposure checks on the active program's live hosts (map first), through the guard as `tool:nuclei`; no response bodies kept. Same exit codes as `recon map` |
 | `recon list H [--json]` | the look-here list |
+| `program show [H] [--json]` | one program at a glance: scope, rules, legal basis (and whether the owner's written note is recorded), recon, findings, time; default the active program |
+| `finding new <slug> [--title T] [--handle H]` | a draft at `findings/<handle>-<slug>/finding.md` with front matter and the report sections |
+| `finding list [--handle H] [--json]` | your findings, newest first (older drafts without front matter are read too) |
+| `finding evidence <id> FLOW_ID…` | copies flows into `findings/<id>/evidence/` with credentials redacted (headers, URL tokens, secret JSON/form fields); other body content is kept, so review it before attaching |
+| `time start [note]` / `time stop` / `time status` | a timer per program (default the active one); starting another stops the running one |
+| `time report [--since DAYS] [--json]` | hours, findings by status, payouts (`payout_eur` in each finding) and €/h per program |
 
 Files: `workspace/bounty/work/<h>/recon/` (`hosts.jsonl`, `live.jsonl`, `urls.jsonl`,
 `mapped.json`, `state.json`).
