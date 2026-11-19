@@ -62,12 +62,64 @@ jobs:
       - name: Build the lab image (not pushed)
         run: docker build -t kali-lab:ci container/
 
+  bounty-unit:
+    name: Bounty unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      # The Mac code supports python3 3.9+ (container/share/bounty/guard_policy.py), but
+      # setup-python has no 3.9 build for ubuntu-latest (26.04): 3.10 is the oldest there.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: bounty package (stdlib only)
+        run: python3 -B -m unittest discover -s bounty/tests -t .
+      - name: scope guard policy
+        run: python3 -B -m unittest tests/test_guard_policy.py
+
+  # Scope guard end to end (tests/bounty-guard-test.sh): builds kali-lab:guard-test, runs a separate
+  # guard container on 127.0.0.1:18081 and a fake target on --internal Docker networks. All local:
+  # nothing is sent to the internet or to any real program.
+  guard-suite:
+    name: Guard integration suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      # Docker on Linux keeps real uids on bind mounts (Docker Desktop on the Mac maps them to the
+      # Mac user). The suite's workspace is shared with the container's hunter (uid 1000), so run it
+      # as uid 1000 from a copy of the checkout that user owns, like the Mac user owns the clone.
+      - name: Prepare a uid 1000 user and checkout copy
+        run: |
+          user=$(getent passwd 1000 | cut -d: -f1 || true)
+          if [ -z "$user" ]; then sudo useradd -u 1000 -m guardtest; user=guardtest; fi
+          sudo usermod -aG docker "$user"
+          sudo mkdir -p /srv/kali-lab
+          sudo cp -a . /srv/kali-lab/
+          sudo chown -R 1000:1000 /srv/kali-lab
+          echo "GUARD_USER=$user" >> "$GITHUB_ENV"
+      - name: Run the suite
+        run: |
+          set -o pipefail
+          sudo -u "$GUARD_USER" -H env PATH="$PATH" bash -c 'cd /srv/kali-lab && tests/bounty-guard-test.sh' 2>&1 | tee guard-test.log
+      - name: Upload the suite log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guard-test-log
+          path: guard-test.log
+          if-no-files-found: ignore
+
   # The one check to require in branch protection: green only if every job above passed, so
   # adding jobs later never means editing the protection rules.
   ci-passed:
     name: CI passed
     if: always()
-    needs: [lint, app, container]
+    needs: [lint, app, container, bounty-unit, guard-suite]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
