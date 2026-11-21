@@ -514,6 +514,30 @@ n=$(flows test-acme | python3 -c 'import json,sys; print(sum(1 for l in sys.stdi
 expect "$n" 8 "replays in the flow log as tool:ac-check (B + none per request)"
 grep -rq "$SA" "$WS/work" && check bad "no session value written to the workspace" || check ok "no session value written to the workspace"
 as_root sh -c 'stat -c %a /dev/shm/bounty-ac/test-acme/a.json' | grep -q '^600$' && check ok "sessions in tmpfs, root 0600" || check bad "sessions in tmpfs, root 0600"
+# BE-29: PostgREST writes are judged by the rows they changed, tiny answers are inconclusive.
+docker exec "$C" bounty-run --actor human -- curl -s -o /dev/null -b "sid=$SA" -X PATCH -H 'Content-Type: application/json' \
+  -H 'Prefer: missing=default, return=minimal' -d '{"title":"x"}' 'https://app.acme.test/rest/v1/notes?id=eq.1'
+docker exec "$C" bounty-run --actor human -- curl -s -o /dev/null -b "sid=$SA" -X PATCH -H 'Content-Type: application/json' \
+  -d '{"title":"x"}' 'https://app.acme.test/rest/v1/open_notes?id=eq.1'
+docker exec "$C" bounty-run --actor human -- curl -s -o /dev/null -b "sid=$SA" -X POST -H 'Content-Type: application/json' \
+  -d '{}' 'https://app.acme.test/rest/v1/rpc/accept_invites'
+cand=$(host/bounty ac candidates --json)
+wids=$(echo "$cand" | jget '" ".join(r["flow_id"] for r in d if "/rest/v1/" in r["url"])')
+expect "$(echo "$wids" | wc -w | tr -d ' ')" 3 "candidates include the three PostgREST requests"
+host/bounty ac replay $wids >/dev/null 2>&1; rc=$?
+expect "$rc" 64 "PostgREST writes still need --unsafe"
+before=$(docker exec "$T" sh -c 'wc -l < /tmp/requests.log')
+# shellcheck disable=SC2046,SC2086
+host/bounty ac replay $wids $(for i in $wids; do printf -- '--unsafe %s ' "$i"; done) >/dev/null 2>"$WS/ac2.err"; rc=$?
+expect "$rc" 0 "ac replay --unsafe of the PostgREST requests exits 0"
+got=$(host/bounty ac results --json | jget 'sorted((r["url"].split("/rest/v1/")[1], r["hint"], r["b"]["verdict"], r["b"].get("rows"), r["none"]["verdict"], r["none"].get("rows")) for r in d if "/rest/v1/" in r["url"])')
+expect "$got" "[('notes?id=eq.1', 'none', 'no-effect', 0, 'no-effect', 0), ('open_notes?id=eq.1', 'likely-broken-access', 'wrote', 1, 'no-effect', 0), ('rpc/accept_invites', 'none', 'inconclusive', None, 'blocked', None)]" "PostgREST: B's write of A's row flagged, no-effect not, 1-byte RPC answer inconclusive"
+sent=$(docker exec "$T" sh -c "tail -n +$((before + 1)) /tmp/requests.log")
+got=$(echo "$sent" | python3 -c 'import json,sys; print(sorted({(r["path"].split("?")[0].rsplit("/",1)[1], r["headers"].get("Prefer")) for r in map(json.loads, filter(str.strip, sys.stdin))}))')
+expect "$got" "[('accept_invites', None), ('notes', 'missing=default, return=representation, count=exact'), ('open_notes', 'return=representation, count=exact')]" "replays ask for the rows back (Prefer merged), the RPC is sent unchanged"
+n=$(echo "$sent" | grep -c "sid=$SA")
+expect "$n" 0 "PostgREST replays never carried account A's session"
+host/bounty ac results | grep -q "B 200 wrote rows=1" && check ok "ac results shows rows=N" || check bad "ac results shows rows=N"
 
 echo "== (r) curated exposure checks on mapped live hosts (CONTRACTS §10.6)"
 use test-acme
