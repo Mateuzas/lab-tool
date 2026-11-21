@@ -21,6 +21,7 @@ exec setpriv --reuid=guard --regid=guard --clear-groups --no-new-privs --inh-cap
     --set upstream_cert=false \
     --set ssl_insecure=false \
     --set rawtcp=false \
+    --set http2=false \
     --set http3=false \
     --set block_global=true \
     --set flow_detail=0 \
