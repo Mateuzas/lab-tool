@@ -7,6 +7,7 @@ import { setupPopout, setupTerminal } from "./terminal";
 import { setupTools } from "./tools";
 import { setupModes } from "./modes";
 import { setupPrograms } from "./programs";
+import { setupGuide } from "./guide";
 
 /** Mirrors lab::LabStatus in src-tauri/src/lab.rs. */
 interface LabStatus {
@@ -336,8 +337,13 @@ async function start() {
       el.textContent = text;
       el.dataset.state = state;
     },
+    guide: () => modes?.guide(true),
   });
-  modes = setupModes(() => status, poll, (m) => { if (m === "bounty") programs.focus(); });
+  const guide = setupGuide({ visible: () => document.body.dataset.view === "guide", back: () => modes?.guide(false) });
+  modes = setupModes(() => status, poll, (m) => {
+    if (m === "bounty") programs.focus();
+    else if (m === "guide") guide.focus();
+  });
   setupTabs();
 
   // Adding a VPN file: the picker reads it here; the backend checks and saves it in the lab.

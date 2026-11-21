@@ -18,6 +18,10 @@
           <span class="swatch" aria-hidden="true"></span><span class="mode-name">Bug bounty</span>
           <span class="mode-state" id="mode-bounty-state" data-state="idle"></span>
         </button>
+        <!-- A screen, not a mode: it starts and stops nothing, and w or Esc goes back. -->
+        <button type="button" class="mode mode-guide" id="mode-guide" aria-pressed="false" aria-keyshortcuts="w">
+          <span class="mode-name">Guide</span><kbd aria-hidden="true">w</kbd>
+        </button>
       </div>
     </nav>
 
@@ -366,7 +370,7 @@
           <span><kbd>/</kbd> filter</span><span><kbd>j</kbd><kbd>k</kbd> move</span><span><kbd>↵</kbd> or <kbd>o</kbd> open</span>
           <span><kbd>r</kbd> refresh</span><span><kbd>c</kbd> changes</span><span><kbd>x</kbd> excluded</span><span><kbd>J</kbd> join</span>
           <span><kbd>u</kbd> use program</span><span><kbd>l</kbd> look here</span><span><kbd>m</kbd> map</span><span><kbd>t</kbd> shell</span><span><kbd>h</kbd> Claude</span><span><kbd>v</kbd> access check</span><span><kbd>f</kbd> findings</span><span><kbd>T</kbd> timer</span><span><kbd>b</kbd> Burp</span><span><kbd>g</kbd> stop guard</span><span><kbd>R</kbd> refusals</span><span><kbd>a</kbd> application</span>
-          <span><kbd>?</kbd> all keys</span>
+          <span><kbd>w</kbd> guide</span><span><kbd>?</kbd> all keys</span>
         </p>
         <p class="pg-note">All target traffic goes through the scope guard. Using a program starts it; Lab stops it.</p>
       </footer>
@@ -397,6 +401,7 @@
               <dt><kbd>a</kbd></dt><dd>Application: none, applied, accepted, rejected</dd>
               <dt><kbd>f</kbd></dt><dd>Findings for the selected program, with hours and €/h</dd>
               <dt><kbd>T</kbd></dt><dd>Start a timer for the active program, or stop it</dd>
+              <dt><kbd>w</kbd></dt><dd>Workflow guide; <kbd>w</kbd> or <kbd>Esc</kbd> comes back</dd>
             </dl>
             <dl>
               <dt>Scope guard</dt><dd></dd>
@@ -413,6 +418,137 @@
             </dl>
           </div>
         </section>
+      </div>
+    </main>
+
+    <!-- Guide (FE-12): the Bug bounty workflow as one static page. A screen, not a mode. -->
+    <main class="guide" id="guide" aria-labelledby="gd-title">
+      <header class="gd-head">
+        <h1 id="gd-title">Guide</h1>
+        <p class="gd-sub">Bug bounty, from sync to submission. CLI commands run from <code>~/Developer/kali-lab</code>.</p>
+        <button type="button" id="gd-back">Back <kbd>w</kbd></button>
+      </header>
+
+      <div class="gd-body">
+        <nav class="gd-index" aria-label="Stages">
+          <ol>
+            <li><a href="#gd-0" data-stage="0"><kbd>0</kbd><span>Each session</span></a></li>
+            <li><a href="#gd-1" data-stage="1"><kbd>1</kbd><span>Pick a program</span></a></li>
+            <li><a href="#gd-2" data-stage="2"><kbd>2</kbd><span>Go live</span></a></li>
+            <li><a href="#gd-3" data-stage="3"><kbd>3</kbd><span>Recon</span></a></li>
+            <li><a href="#gd-4" data-stage="4"><kbd>4</kbd><span>Test by hand</span></a></li>
+            <li><a href="#gd-5" data-stage="5"><kbd>5</kbd><span>Two accounts</span></a></li>
+            <li><a href="#gd-6" data-stage="6"><kbd>6</kbd><span>Write the finding</span></a></li>
+            <li><a href="#gd-7" data-stage="7"><kbd>7</kbd><span>Submit</span></a></li>
+            <li class="gd-index-later"><a href="#gd-later" data-stage="8"><span>Not built yet</span></a></li>
+          </ol>
+          <p class="gd-keys"><span><kbd>j</kbd><kbd>k</kbd> scroll</span><span><kbd>0</kbd>–<kbd>7</kbd> jump</span><span><kbd>w</kbd> <kbd>Esc</kbd> back</span></p>
+        </nav>
+
+        <div class="gd-scroll" id="gd-scroll" tabindex="-1">
+          <ol class="gd-stages">
+            <li class="gd-stage" id="gd-0">
+              <h2><span class="gd-n" aria-hidden="true">0</span>Each session</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"></span><p>Start Docker Desktop, then open Lab Tool. It syncs Intigriti at start, then every 20 minutes.</p></li>
+                <li><span class="gd-k"><kbd>r</kbd></span><p>Sync now.</p></li>
+                <li><span class="gd-k"><kbd>c</kbd></span><p>Changes since the last sync: new programs, scope, bounties, rules. Only there when something changed.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-1">
+              <h2><span class="gd-n" aria-hidden="true">1</span>Pick a program</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"><kbd>j</kbd><kbd>k</kbd></span><p>Move through the ranking.</p></li>
+                <li><span class="gd-k"><kbd>↵</kbd><kbd>o</kbd></span><p>Open the program on Intigriti and read its rules.</p></li>
+                <li><span class="gd-k"><kbd>a</kbd></span><p>On a program you have to join: application state, none → applied → accepted → rejected.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty program show <var>&lt;handle&gt;</var></code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Scope, rules, recon, findings and hours on one screen. Leave out the handle for the active program.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-2">
+              <h2><span class="gd-n" aria-hidden="true">2</span>Go live</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"><kbd>u</kbd></span><p>Load the selected program into the scope guard, starting it if needed. One program at a time: switching from another asks for a second <kbd>u</kbd>. All traffic goes through the guard.</p></li>
+                <li><span class="gd-k"><kbd>T</kbd></span><p>Start or stop the timer for the active program. Its hours drive €/h.</p></li>
+                <li><span class="gd-k"><kbd>g</kbd></span><p>Stop the guard when you’re done.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-3">
+              <h2><span class="gd-n" aria-hidden="true">3</span>Recon</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"><kbd>l</kbd></span><p>Look here: hosts from passive recon (crt.sh and DNS), most interesting first, new ones highlighted.</p></li>
+                <li><span class="gd-k"><kbd>m</kbd></span><p>Map the active program with httpx and katana at its rate. <kbd>m</kbd> again stops; a later <kbd>m</kbd> resumes and skips hosts mapped in the last 7 days.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty recon map --all</code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Map every host again, recent ones too.</p></li>
+                <li><span class="gd-k"><kbd>e</kbd></span><p>In look here, after a map: the 13 exposure checks on live hosts. A hit adds the <span class="gd-chip">exposed</span> chip and raises interest.</p></li>
+                <li><span class="gd-k"><kbd>↵</kbd><kbd>y</kbd></span><p>In look here: <kbd>↵</kbd> shows the host’s URL, <kbd>y</kbd> copies it.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-4">
+              <h2><span class="gd-n" aria-hidden="true">4</span>Test by hand</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"><kbd>b</kbd></span><p>Open Burp through the guard. Paste the URL into Burp’s browser (Proxy, then Open browser).</p></li>
+                <li><span class="gd-k"><kbd>R</kbd></span><p>Site broken? The newest requests the guard refused. Approve the program’s CDN or login hosts for your own browsing only (GET, HEAD, OPTIONS). Tools, maps, replays and Claude stay refused.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty program browse</code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Hosts your browsing hit that aren’t in scope, and the ones you approved.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty program browse allow <var>&lt;host&gt;…</var></code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Add <code>--any-method</code> for a login host that needs POST.</p></li>
+                <li><span class="gd-k"><kbd>t</kbd></span><p>A shell in the guard container. Tools are held to scope and the program’s rate.</p></li>
+                <li><span class="gd-k"><kbd>h</kbd></span><p>The Claude copilot. Reads recon and access results and drafts findings. It runs only the checks you approve, one at a time, through the guard.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-5">
+              <h2><span class="gd-n" aria-hidden="true">5</span>Two accounts</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"></span><p>Log in as account A in Burp’s browser, and as B in its incognito window (<kbd>⌘⇧N</kbd>). Don’t log out of either.</p></li>
+                <li><span class="gd-k"><kbd>v</kbd></span><p>Open the access check.</p></li>
+                <li><span class="gd-k"><kbd>1</kbd><kbd>2</kbd></span><p><kbd>1</kbd> pastes A’s <code>Cookie</code> (and <code>X-Csrf-Token</code>) lines, <kbd>⌘↵</kbd> saves. <kbd>2</kbd> does the same for B.</p></li>
+                <li><span class="gd-k"></span><p>Click around the site as A.</p></li>
+                <li><span class="gd-k"><kbd>Space</kbd><kbd>↵</kbd></span><p>In <kbd>v</kbd>: <kbd>Space</kbd> picks requests, <kbd>!</kbd> allows one that changes data, <kbd>↵</kbd> replays them as B and with no session.</p></li>
+                <li><span class="gd-k"><kbd>Tab</kbd></span><p>Results. Confirm every <span class="gd-chip gd-chip-check">CHECK</span> by hand in Burp before reporting.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-6">
+              <h2><span class="gd-n" aria-hidden="true">6</span>Write the finding</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"><kbd>f</kbd><kbd>n</kbd></span><p>New draft at <code>workspace/bounty/findings/<var>&lt;handle&gt;</var>-<var>&lt;slug&gt;</var>/finding.md</code>; <kbd>↵</kbd> creates it and opens it in your editor. <kbd>h</kbd> can draft one too.</p></li>
+                <li><span class="gd-k"></span><p>Fill in summary, steps, impact, severity or CVSS, and asset.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty ac candidates</code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Flow IDs of A’s requests. <code>host/bounty flows --json</code> has every flow’s <code>flow_id</code>.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty finding evidence <var>&lt;id&gt;</var> <var>&lt;flow-id&gt;…</var></code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Attach flows with credentials redacted. Bodies are kept: review them first.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty flows export <var>&lt;handle&gt;</var> <var>&lt;dir&gt;</var></code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>The full flow dump, to a folder on this Mac.</p></li>
+              </ul>
+            </li>
+
+            <li class="gd-stage" id="gd-7">
+              <h2><span class="gd-n" aria-hidden="true">7</span>Submit</h2>
+              <ul class="gd-steps">
+                <li><span class="gd-k"></span><p>Paste finding.md into Intigriti’s form and upload <code>evidence/</code>. Submitting is manual.</p></li>
+                <li><span class="gd-k"></span><p>Set <code>status:</code> in the front matter by hand, and <code>payout_eur:</code> once it pays.</p></li>
+                <li><span class="gd-k"><kbd>f</kbd></span><p>Hours and €/h. A program’s €/h uses <code>payout_eur</code>; the all-programs total uses your Intigriti payouts, which arrive with the next sync.</p></li>
+                <li class="gd-cli"><span class="gd-k"></span><div class="gd-cmd"><code>host/bounty time report</code><button type="button" class="gd-copy">Copy</button></div>
+                  <p>Hours, findings, payouts and €/h per program.</p></li>
+              </ul>
+            </li>
+
+          </ol>
+          <section class="gd-stage gd-later" id="gd-later" aria-labelledby="gd-later-title">
+            <h2 id="gd-later-title">Not built yet</h2>
+            <ul class="gd-steps">
+              <li><span class="gd-k"></span><p>Approving browse hosts from the app (FE-11). Use the CLI in stage 4.</p></li>
+              <li><span class="gd-k"></span><p>Hosts the guard can’t reach at all (TLS or DNS errors) don’t show under <kbd>R</kbd> (BE-28).</p></li>
+              <li><span class="gd-k"></span><p>Submitting reports and changing a finding’s status from the app.</p></li>
+            </ul>
+          </section>
+        </div>
       </div>
     </main>
   </body>

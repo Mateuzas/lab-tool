@@ -150,7 +150,7 @@ const nextApp = (s: string | undefined) => APP_CYCLE[(APP_CYCLE.indexOf((s ?? "n
 const isJoin = (p: RankedProgram) => p.flags.includes("join");
 const industry = (p: RankedProgram) => String(p.industry ?? p.inputs.industry ?? "");
 
-export function setupPrograms(opts: { visible: () => boolean; setModeState: (text: string, state: string) => void }) {
+export function setupPrograms(opts: { visible: () => boolean; setModeState: (text: string, state: string) => void; guide: () => void }) {
   let ranking: Ranking | null = null;
   let manual: ManualTarget[] = [];
   let loadError = "";
@@ -733,6 +733,7 @@ export function setupPrograms(opts: { visible: () => boolean; setModeState: (tex
       case "g": void guard.stop(); break;
       case "a": void cycleApplication(); break;
       case "?": toggleHelp(true); break;
+      case "w": opts.guide(); break;
       case "R": guard.toggleRefusals(); break;
       case "l": if (selected) look.open(selected); break;
       case "m": if (selected) look.map(selected); break;
