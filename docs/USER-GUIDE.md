@@ -78,8 +78,20 @@ followed or top-25 programs; bounty raised; rules changed or program suspended/c
 | `R` | requests the guard refused recently (newest 5) |
 | `l` | look-here list for the selected program |
 | `m` | map the active program (the selected row must be the active one) |
+| `w` | the Guide: this workflow as a screen inside the app (also **Guide** at the right of the mode bar) |
 | `?` | shortcut overlay |
 | `Esc` | close the overlay / popover / changes, cancel a pending switch, clear the filter |
+
+### Guide screen
+
+The workflow from sync to submission, stage by stage, with the keys and copyable CLI commands.
+It is a screen, not a mode: opening it starts and stops nothing.
+
+| Key | Does |
+|---|---|
+| `j` `k` | scroll (arrows, `Space`, `PgUp` `PgDn` work too) |
+| `0`–`7` | jump to a stage |
+| `w` / `Esc` | back to the screen you came from |
 
 ### Look-here panel
 
