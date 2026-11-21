@@ -13,7 +13,7 @@ export type AcStatus = { handle: string | null; a: AcSession | null; b: AcSessio
 export type AcCandidate = { flow_id: string; ts: string; method: string; url: string; status: number | null; length: number | null; safe: boolean };
 export type AcVariant = {
   status: number | null; length: number | null; similarity?: number; markers?: number; a_ids?: number;
-  verdict?: string; refused?: string;
+  verdict?: string; refused?: string; rows?: number; reason?: string;
 };
 export type AcResult = { ts: string; flow_id: string; method: string; url: string; a: AcVariant; b: AcVariant; none: AcVariant; hint: string | null };
 type Who = "a" | "b";
@@ -34,13 +34,16 @@ const hhmm = (iso: string | null | undefined) => {
   return isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 };
 const HINT_RANK: Record<string, number> = { "likely-broken-access": 0, public: 1 };
-const FLAGGED = new Set(["leak", "same-as-a", "a-data"]);
+const FLAGGED = new Set(["leak", "same-as-a", "a-data", "wrote"]);
 const VERDICT_TITLE: Record<string, string> = {
   blocked: "Refused as expected (401, 403, 404, 405, a redirect, or not 2xx)",
   leak: "One of A's markers appears in this answer",
   "same-as-a": "Nearly the same body as A's (similarity 0.95 or more)",
   "a-data": "Ids or emails from A's answer appear in this one",
   differs: "Answered, but not like A's answer",
+  wrote: "The write changed rows (PostgREST returned them): B or no session changed data",
+  "no-effect": "The write changed no rows",
+  inconclusive: "Can't tell from the response (empty or tiny answers): check by hand in Burp",
   refused: "The scope guard refused this replay",
   error: "No answer",
 };
@@ -387,9 +390,11 @@ export function setupAccess(opts: {
       p.title = (VERDICT_TITLE[verdict] ?? verdict) + (v.refused ? `: ${v.refused}` : "");
       td.append(p);
     }
-    if (withSim) td.append(el("span", "sim", v.similarity != null && v.status != null ? v.similarity.toFixed(2) : ""));
+    if (withSim) td.append(el("span", "sim", v.rows != null ? `rows=${v.rows}`
+      : v.similarity != null && v.status != null ? v.similarity.toFixed(2) : ""));
     const bits = [v.length != null ? `${v.length} bytes` : "", v.markers ? `${v.markers} marker hit${v.markers === 1 ? "" : "s"}` : "",
-      v.a_ids ? `${v.a_ids} of A's ids` : "", v.refused ? `refused: ${v.refused}` : ""].filter(Boolean);
+      v.a_ids ? `${v.a_ids} of A's ids` : "", v.rows != null ? `${v.rows} row${v.rows === 1 ? "" : "s"} changed` : "",
+      v.reason ?? "", v.refused ? `refused: ${v.refused}` : ""].filter(Boolean);
     td.title = bits.join(", ");
     return td;
   }

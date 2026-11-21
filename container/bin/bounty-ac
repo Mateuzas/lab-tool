@@ -191,7 +191,8 @@ def cmd_candidates(a):
 # -- replay ---------------------------------------------------------------------------------------
 
 def send(method, url, headers, body):
-    """One request through the guard, no redirects followed -> (status, body, refused reason)."""
+    """One request through the guard, no redirects followed -> (status, body, refused reason,
+    Content-Range). Content-Range is only read to count rows; it's never stored."""
     p = urllib.parse.urlsplit(url)
     path = (p.path or "/") + ("?" + p.query if p.query else "")
     hdrs = [(k, v) for k, v in headers if not k.startswith(":")]
@@ -216,13 +217,13 @@ def send(method, url, headers, body):
         data = r.read(MAX_BODY)
         g = r.getheader("X-Bounty-Guard") or ""
         refused = g.split("reason=", 1)[-1].strip() if g.startswith("refused") else None
-        return r.status, data, refused
+        return r.status, data, refused, r.getheader("Content-Range")
     except (OSError, http.client.HTTPException) as e:
         # A CONNECT the guard refuses ends the tunnel with its 403: same as a refusal.
         msg = str(e)
         if "403" in msg:
-            return None, b"", "refused-at-connect"
-        return None, b"", None
+            return None, b"", "refused-at-connect", None
+        return None, b"", None, None
     finally:
         conn.close()
 
@@ -252,9 +253,11 @@ def cmd_replay(a):
             raise Usage("%s is a %s: replaying it as B could change data; add --unsafe %s to allow it" % (fid, m, fid))
         if fl.response is None:
             raise Usage("%s has no recorded answer" % fid)
-        plan.append({"fid": fid, "method": m, "url": fl.request.pretty_url, "headers": headers_of(fl),
+        url = fl.request.pretty_url
+        a_resp = [[k, v] for k, v in fl.response.headers.items(multi=True)]
+        plan.append({"fid": fid, "method": m, "url": url, "headers": headers_of(fl),
                      "body": fl.request.raw_content or b"", "a_status": fl.response.status_code,
-                     "a_body": body_of(fl.response)})
+                     "a_body": body_of(fl.response), "count": ac.counts_rows(m, url, a_resp)})
     sessions = (sa["headers"], sb["headers"])
     markers = sa.get("markers") or []
     out_dir = os.path.join(WORK, a.handle, "ac")
@@ -267,11 +270,15 @@ def cmd_replay(a):
         rec = {"ts": now(), "flow_id": p["fid"], "method": p["method"], "url": ac.redact_url(p["url"]),
                "a": {"status": p["a_status"], "length": len(p["a_body"])}}
         for name, use in (("b", sb["headers"]), ("none", None)):
-            st, body, refused = send(p["method"], p["url"], ac.rewrite(p["headers"], sessions, use), p["body"])
+            hdrs = ac.rewrite(p["headers"], sessions, use)
+            if p["count"]:   # a PostgREST write: ask for the changed rows back (same rows targeted)
+                hdrs = ac.with_representation(hdrs)
+            st, body, refused, crange = send(p["method"], p["url"], hdrs, p["body"])
             if refused == "automation-forbidden":
                 log("automation-forbidden: the guard refuses automated tools for %s" % a.handle)
                 return 6
-            rec[name] = ac.judge(p["a_status"], p["a_body"], p["url"], markers, st, body, refused)
+            rec[name] = ac.judge(p["a_status"], p["a_body"], p["url"], markers, st, body, refused,
+                                 count=p["count"], content_range=crange)
         rec["hint"] = ac.hint(rec["b"]["verdict"], rec["none"]["verdict"])
         results.append(rec)
         with open(os.path.join(out_dir, "results.jsonl"), "a", encoding="utf-8") as f:

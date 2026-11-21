@@ -97,6 +97,7 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | BE-25 | Backender | `finding new|list|evidence` (redacted evidence from the guard's flows), `program show`, `time start|stop|status|report` with €/h (CONTRACTS §6, §7, §14); findings live in `workspace/bounty/findings/` | done |
 | BE-26 | Backender | `payouts sync` (own Intigriti payouts, EUR via fx; also on every full sync), `time status --json`, `time report` totals with real €/h (CONTRACTS §14, §14.1) | done |
 | BE-27 | Backender | Browse-only hosts you approve per program (CDN, login): `program browse allow|remove`, candidates from your refused traffic, guard category `browse` (human, read methods by default) (CONTRACTS §3.5) | done |
+| BE-29 | Backender | Access check: PostgREST writes judged by the rows they changed (`Prefer: return=representation` on B / none; `wrote` / `no-effect`), empty or tiny answers `inconclusive` instead of a false `same-as-a` (CONTRACTS §13.3) | done |
 | BE-28 | Backender | Upstream connection failures (TLS verify, connect refused) aren't in the flow log: log them with the error (found in BE-27) | todo |
 | FE-11 | Frontender | Approve browse-only hosts from the app: candidates in the refusals panel (`R`), one key to approve (read) or approve for any method (§3.5) | todo |
 | FE-12 | Frontender | Guide screen (`w`, mode bar): the bounty workflow as static, scannable stages 0–7 with keys, copyable commands and what's not built yet | done |

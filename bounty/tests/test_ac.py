@@ -89,6 +89,7 @@ class Judge(unittest.TestCase):
         self.assertEqual(core.hint("same-as-a", "same-as-a"), "public")
         self.assertEqual(core.hint("blocked", "blocked"), "none")
         self.assertEqual(core.hint("differs", "blocked"), "none")
+        self.assertEqual(core.hint("inconclusive", "inconclusive"), "none")
 
     def test_helpers(self):
         self.assertTrue(core.is_safe("get") and core.is_safe("HEAD") and not core.is_safe("POST"))
@@ -97,6 +98,75 @@ class Judge(unittest.TestCase):
                          "https://a.test/x?id=7&access_token=***&sig=***")
         self.assertEqual(core.redact_url("https://a.test/x"), "https://a.test/x")
         self.assertEqual(core.similarity(b"", b""), 1.0)
+
+
+class Writes(unittest.TestCase):
+    """BE-29: PostgREST writes are judged by the rows they changed; tiny answers aren't comparable."""
+    URL = "https://x.supabase.co/rest/v1/notes?id=eq.42"
+
+    def test_postgrest_rule(self):
+        self.assertTrue(core.is_postgrest(self.URL, []))
+        self.assertTrue(core.is_postgrest("https://api.x.test/notes", [["Server", "postgrest/12.2.3"]]))
+        self.assertTrue(core.is_postgrest("https://api.x.test/notes", [["Content-Range", "*/0"]]))
+        self.assertTrue(core.is_postgrest("https://api.x.test/notes", [["content-range", "0-24/*"]]))
+        self.assertFalse(core.is_postgrest("https://x.test/file", [["Content-Range", "bytes 0-99/1000"]]))
+        self.assertFalse(core.is_postgrest("https://x.test/api/notes", [["Server", "nginx"]]))
+        self.assertFalse(core.is_postgrest("https://x.supabase.co/rest/v1/rpc/accept_staff_invites", []))
+        self.assertFalse(core.is_postgrest("https://api.x.test/rpc/f", [["Server", "postgrest/12"]]))
+        self.assertTrue(core.counts_rows("patch", self.URL, []))
+        self.assertTrue(core.counts_rows("DELETE", self.URL, []) and core.counts_rows("POST", self.URL, []))
+        self.assertFalse(core.counts_rows("GET", self.URL, []))
+
+    def test_prefer_merge(self):
+        wr = core.with_representation
+        self.assertEqual(wr([["Host", "x"]]), [["Host", "x"], ["Prefer", "return=representation, count=exact"]])
+        self.assertEqual(wr([["Host", "x"], ["prefer", "return=minimal, missing=default"], ["Accept", "*/*"]]),
+                         [["Host", "x"], ["Prefer", "missing=default, return=representation, count=exact"], ["Accept", "*/*"]])
+        two = wr([["Prefer", "tx=commit"], ["Prefer", "count=planned,tx=commit"], ["Prefer", "return=representation"]])
+        self.assertEqual(two, [["Prefer", "tx=commit, return=representation, count=exact"]])
+
+    def test_count_rows(self):
+        self.assertEqual(core.count_rows(b"[]"), 0)
+        self.assertEqual(core.count_rows(b'[{"id":1},{"id":2}]'), 2)
+        self.assertEqual(core.count_rows(b'{"id":1}'), 1)
+        self.assertEqual(core.count_rows(b"", "*/3"), 3)
+        self.assertIsNone(core.count_rows(b"", "*/*"))
+        self.assertIsNone(core.count_rows(b""))
+        self.assertIsNone(core.count_rows(b"<html>"))
+
+    def test_204_empty_is_inconclusive(self):
+        r = core.judge(204, b"", self.URL, [], 204, b"")
+        self.assertEqual((r["verdict"], r["reason"]), ("inconclusive", "both answers are empty"))
+        # counted, but the server ignored Prefer: still nothing to judge
+        r = core.judge(204, b"", self.URL, [], 204, b"", count=True)
+        self.assertEqual(r["verdict"], "inconclusive")
+        self.assertNotIn("rows", r)
+        self.assertEqual(core.hint(r["verdict"], r["verdict"]), "none")
+
+    def test_representation_empty_is_no_effect(self):
+        r = core.judge(204, b"", self.URL, [], 200, b"[]", count=True, content_range="*/0")
+        self.assertEqual((r["verdict"], r["rows"]), ("no-effect", 0))
+        self.assertNotIn("reason", r)
+        self.assertEqual(core.hint("no-effect", "no-effect"), "none")
+
+    def test_representation_rows_is_wrote(self):
+        body = b'[{"id":42,"owner":"alice@a.test","title":"x"}]'
+        r = core.judge(204, b"", self.URL, ["alice@a.test"], 200, body, count=True)
+        self.assertEqual((r["verdict"], r["rows"], r["markers"]), ("wrote", 1, 1))
+        self.assertEqual(core.hint("wrote", "no-effect"), "likely-broken-access")
+        self.assertEqual(core.hint("wrote", "wrote"), "public")
+        self.assertEqual(core.judge(204, b"", self.URL, [], 403, b'{"code":"42501"}', count=True)["verdict"], "blocked")
+        self.assertNotIn("alice", json.dumps(r))
+
+    def test_tiny_bodies_are_inconclusive(self):
+        url = "https://x.supabase.co/rest/v1/rpc/accept_staff_invites"
+        r = core.judge(200, b"1", url, [], 200, b"1")
+        self.assertEqual((r["verdict"], r["reason"]), ("inconclusive", "both answers are 8 bytes or less"))
+        self.assertEqual(core.hint(r["verdict"], "blocked"), "none")
+        self.assertEqual(core.judge(200, b"[]", url, [], 200, b"[]\n")["verdict"], "inconclusive")
+        self.assertEqual(core.judge(200, b'{"ok":1}', url, ["ok"], 200, b'{"ok":1}')["verdict"], "leak")
+        # one side big, one tiny: comparable
+        self.assertEqual(core.judge(200, Judge.A_BODY, url, [], 200, b"[]")["verdict"], "differs")
 
 
 class MacSide(unittest.TestCase):
@@ -174,6 +244,25 @@ class MacSide(unittest.TestCase):
         out = io.StringIO()
         ac.results(self.ws, "test-acme", True, out=out)
         self.assertEqual([r["hint"] for r in json.loads(out.getvalue())], ["likely-broken-access", "public", "none"])
+
+    def test_results_text_rows_and_new_verdicts(self):
+        d = os.path.join(self.ws, "work", "test-acme", "ac")
+        os.makedirs(d)
+        rows = [{"ts": "t1", "hint": "likely-broken-access", "method": "PATCH", "url": "https://x/rest/v1/n?id=eq.1",
+                 "a": {"status": 204}, "b": {"status": 200, "verdict": "wrote", "rows": 1, "similarity": 0.0},
+                 "none": {"status": 200, "verdict": "no-effect", "rows": 0, "similarity": 0.0}},
+                {"ts": "t0", "hint": "none", "method": "POST", "url": "https://x/rest/v1/rpc/f",
+                 "a": {"status": 200}, "b": {"status": 200, "verdict": "inconclusive", "reason": "both answers are 8 bytes or less",
+                                            "similarity": 1.0}, "none": {"status": 401, "verdict": "blocked"}}]
+        with open(os.path.join(d, "results.jsonl"), "w") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in rows))
+        out = io.StringIO()
+        ac.results(self.ws, "test-acme", False, out=out)
+        text = out.getvalue()
+        self.assertIn("B 200 wrote rows=1 (0.00)  none 200 no-effect rows=0", text)
+        self.assertIn("B 200 inconclusive (1.00)  none 401 blocked\n", text)
+        self.assertIn("can't be compared; check by hand", text)
+        self.assertLess(text.index("CHECK"), text.index("rpc/f"))
 
 
 if __name__ == "__main__":

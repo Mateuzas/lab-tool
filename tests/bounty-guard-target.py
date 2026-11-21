@@ -26,6 +26,25 @@ ALICE = {"owner": "alice@acme.test", "account": "1000001", "doc": "alice's trave
 BOB = {"owner": "bob@acme.test", "account": "2000002", "doc": "bob keeps different notes here"}
 
 
+def rest_answer(method, path, cookie, prefer):
+    """A PostgREST-like table (BE-29): writes answer 204 with no body unless Prefer asks for
+    return=representation; then the changed rows: alice's row 1 for its owner (notes) or for any
+    logged-in caller (open_notes, the broken RLS), [] otherwise. /rest/v1/rpc/accept_invites
+    answers 1 to anyone logged in, like a function acting on the caller's own invites."""
+    sid = "a" if "sid=" + AC_A in cookie else ("b" if "sid=" + AC_B in cookie else None)
+    route = path.split("?")[0]
+    if route == "/rest/v1/rpc/accept_invites":
+        return (200, b"1", {}) if sid else (401, b'{"message":"JWT expired"}', {})
+    if route not in ("/rest/v1/notes", "/rest/v1/open_notes") or method not in ("PATCH", "DELETE", "POST"):
+        return 404, b"{}", {}
+    owns = sid == "a" or (route == "/rest/v1/open_notes" and sid is not None)
+    rows = [dict(ALICE, id=1)] if owns else []
+    if "return=representation" not in prefer:
+        return 204, b"", {}
+    hdrs = {"Content-Range": "*/%d" % len(rows)} if "count=exact" in prefer else {}
+    return 200, json.dumps(rows).encode(), hdrs
+
+
 def ac_answer(method, path, cookie):
     sid = "a" if "sid=" + AC_A in cookie else ("b" if "sid=" + AC_B in cookie else None)
     route = path.split("?")[0]
@@ -51,15 +70,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             self.rfile.read(length)
-        status = 200
+        status, extra = 200, {}
         if self.path == "/ip":
             body = b"198.51.100.20\n"
             ctype = "text/plain"
         elif self.path in EXPOSED:              # planted for the BE-20 exposure checks (CONTRACTS §10.6)
             body = EXPOSED[self.path]
             ctype = "text/plain"
-        elif self.path.startswith("/ac/"):
-            status, body = ac_answer(self.command, self.path, self.headers.get("Cookie") or "")
+        elif self.path.startswith(("/ac/", "/rest/v1/")):
+            if self.path.startswith("/ac/"):
+                status, body = ac_answer(self.command, self.path, self.headers.get("Cookie") or "")
+            else:
+                status, body, extra = rest_answer(self.command, self.path, self.headers.get("Cookie") or "",
+                                                  self.headers.get("Prefer") or "")
             ctype = "application/json"
             with lock, open(LOG, "a") as f:     # so the test can see which session each replay carried
                 f.write(json.dumps({"method": self.command, "path": self.path,
@@ -74,11 +97,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ctype = "application/json"
         self.send_response(status)
         self.send_header("Content-Type", ctype)
+        for k, v in extra.items():
+            self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    do_GET = do_POST = do_HEAD = do_PUT = _answer
+    do_GET = do_POST = do_HEAD = do_PUT = do_PATCH = do_DELETE = _answer
 
     def log_message(self, *a):
         pass

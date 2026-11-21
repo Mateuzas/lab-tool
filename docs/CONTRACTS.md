@@ -589,19 +589,42 @@ followed. A's answer is the recorded one (not re-sent). A request whose method i
 helper (`bounty-ac`, run with `docker exec`) reads sessions and flows, then drops to uid hunter before
 it opens any connection.
 
+**PostgREST writes (BE-29).** A write (POST, PUT, PATCH, DELETE) to a PostgREST table usually
+answers `204` with no body whether or not a row matched, so bodies can't be compared. A request is a
+PostgREST table write when its method is one of those and: the URL path contains `/rest/v1/`
+(Supabase), or A's recorded answer has a `Server` header containing `postgrest`, or a unit-less
+`Content-Range` (`*/0`, `0-9/*`; a byte range says `bytes …` and doesn't count). RPC calls
+(`/rest/v1/rpc/…`, or a path ending `/rpc/<name>`) are excluded: their body is the function's
+result, not rows. For such a write the B and none variants carry one `Prefer` header: the
+request's own preferences kept, any `return=` / `count=` replaced by `return=representation,
+count=exact`. That changes only what comes back, never which rows are targeted (if the target's
+read policy hides the changed row, PostgREST answers an error instead and the write doesn't
+happen). `rows` = the length of the JSON array in the answer (an object = 1), else the total in
+`Content-Range` (`*/N`); A's recorded answer has none (A sent no such Prefer), so B and none are
+judged on their own rows. Unsafe methods still need `--unsafe`.
+
 Per variant (B, none): `status`, `length`, `similarity` to A's body (0..1, first 64 KB),
 `markers` (how many of A's `--marker` texts appear), `a_ids` (emails / UUIDs / ids of ≥ 6 digits
-found in A's body, not in the URL, that also appear in this body), and `verdict`:
-`blocked` (401, 403, 404, 405, 3xx, or not 2xx while A's was) · `leak` (a marker appears) ·
+found in A's body, not in the URL, that also appear in this body), `rows` (only for a counted
+PostgREST write with a 2xx answer that could be counted), `reason` (only with `inconclusive`), and
+`verdict`, first match wins:
+`blocked` (401, 403, 404, 405, 3xx, or not 2xx while A's was) · for a counted write: `wrote`
+(`rows` ≥ 1) or `no-effect` (`rows` = 0) · `leak` (a marker appears) · `inconclusive` (A's body
+and this one are both ≤ 8 bytes after trimming whitespace, e.g. both empty or `1` / `[]`;
+`reason`: "both answers are empty" or "both answers are 8 bytes or less"; check by hand) ·
 `same-as-a` (similarity ≥ 0.95) · `a-data` (`a_ids` ≥ 1) · `differs`; and `refused` (the guard
 refused it, e.g. the scope changed; `refused: <reason>` kept) · `error` (no answer).
+A counted write whose answer has no countable rows (the server ignored `Prefer`) falls through to
+the other rules, so an empty `204` is `inconclusive`. A `wrote` on a POST insert can be B creating
+its own row: confirm whose row it is by hand.
 A refusal for `automation-forbidden` stops the run (exit 6). Logic: `container/share/bounty/ac_core.py`.
-`hint` per request (flagged = `leak`, `same-as-a` or `a-data`): `likely-broken-access` when B is
-flagged and none is not; `public` when both are flagged (the data is probably public); `none`
-otherwise.
+`hint` per request (flagged = `leak`, `same-as-a`, `a-data` or `wrote`; `no-effect` and
+`inconclusive` never are): `likely-broken-access` when B is flagged and none is not; `public` when
+both are flagged (the data is probably public); `none` otherwise.
 Writes `work/<h>/ac/results.jsonl` (one line per replayed request:
 `{"ts","flow_id","method","url","a":{"status","length"},"b":{…},"none":{…},"hint"}`); **no bodies and
-no header values** are stored. `host/bounty ac results [--json]` prints them, flagged first.
+no header values** are stored. `host/bounty ac results [--json]` prints them, flagged first; the
+text form shows `rows=N` after a counted variant's verdict and a note when any is `inconclusive`.
 
 ### 13.4 App (FE-9)
 | Command | Runs | Returns |
