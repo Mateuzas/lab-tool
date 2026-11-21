@@ -792,6 +792,12 @@ pub struct AcVariant {
     pub verdict: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub refused: Option<String>,
+    /// Rows a PostgREST write changed (BE-29); absent when not counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u64>,
+    /// Why the verdict is `inconclusive` (BE-29).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// One line of `ac results --json` (CONTRACTS §13.3).
@@ -1458,6 +1464,17 @@ mod tests {
         let back = serde_json::to_value(&r[0]).unwrap();
         assert_eq!(back["a"], serde_json::json!({"status": 200, "length": 900}));
         assert_eq!(back["b"]["similarity"], serde_json::json!(0.97));
+        let w: Vec<AcResult> = serde_json::from_str(r#"[{"ts":"t","flow_id":"3f2a9c1e-77b1","method":"PATCH","url":"https://x.test/rest/v1/n",
+            "a":{"status":204,"length":0},
+            "b":{"status":200,"length":40,"similarity":0.0,"markers":0,"a_ids":0,"verdict":"wrote","rows":1},
+            "none":{"status":204,"length":0,"similarity":1.0,"markers":0,"a_ids":0,"verdict":"inconclusive","reason":"both answers are empty"},
+            "hint":"likely-broken-access"}]"#).unwrap();
+        assert_eq!(w[0].b.rows, Some(1));
+        assert_eq!(w[0].none.reason.as_deref(), Some("both answers are empty"));
+        let back = serde_json::to_value(&w[0]).unwrap();
+        assert_eq!(back["b"]["rows"], serde_json::json!(1));
+        assert_eq!(back["none"]["verdict"], serde_json::json!("inconclusive"));
+        assert!(back["none"].get("rows").is_none());
         let st: AcStatus = serde_json::from_str(r#"{"a":{"names":["Cookie"],"markers":1,"set_at":"2026-11-18T10:00:00Z"},"b":null,"handle":"intigriti-x"}"#).unwrap();
         assert_eq!(st.a.unwrap().names, vec!["Cookie"]);
         assert!(st.b.is_none());
