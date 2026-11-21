@@ -111,15 +111,22 @@ def _flag(r):
     return {"likely-broken-access": 0, "public": 1}.get(r.get("hint"), 2)
 
 
+def _rows(v):
+    return " rows=%d" % v["rows"] if isinstance(v.get("rows"), int) else ""
+
+
 def _print_results(rows, out):
     for r in sorted(rows, key=_flag):
         b, n = r.get("b") or {}, r.get("none") or {}
         mark = {"likely-broken-access": "CHECK", "public": "public"}.get(r.get("hint"), "")
-        out.write("%-6s %-7s %s\n       A %s  B %s %s (%.2f)  none %s %s\n" % (
+        out.write("%-6s %-7s %s\n       A %s  B %s %s%s (%.2f)  none %s %s%s\n" % (
             mark, r.get("method"), r.get("url"), (r.get("a") or {}).get("status"),
-            b.get("status"), b.get("verdict"), b.get("similarity") or 0, n.get("status"), n.get("verdict")))
+            b.get("status"), b.get("verdict"), _rows(b), b.get("similarity") or 0,
+            n.get("status"), n.get("verdict"), _rows(n)))
     if any(r.get("hint") == "likely-broken-access" for r in rows):
         out.write("CHECK rows: confirm by hand in Burp before reporting (repeat as B, compare the data).\n")
+    if any((r.get(k) or {}).get("verdict") == "inconclusive" for r in rows for k in ("b", "none")):
+        out.write("inconclusive: the answers are empty or tiny, so they can't be compared; check by hand in Burp.\n")
 
 
 def results(ws, handle=None, as_json=False, out=sys.stdout):

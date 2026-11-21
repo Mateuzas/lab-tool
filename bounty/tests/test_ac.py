@@ -245,6 +245,25 @@ class MacSide(unittest.TestCase):
         ac.results(self.ws, "test-acme", True, out=out)
         self.assertEqual([r["hint"] for r in json.loads(out.getvalue())], ["likely-broken-access", "public", "none"])
 
+    def test_results_text_rows_and_new_verdicts(self):
+        d = os.path.join(self.ws, "work", "test-acme", "ac")
+        os.makedirs(d)
+        rows = [{"ts": "t1", "hint": "likely-broken-access", "method": "PATCH", "url": "https://x/rest/v1/n?id=eq.1",
+                 "a": {"status": 204}, "b": {"status": 200, "verdict": "wrote", "rows": 1, "similarity": 0.0},
+                 "none": {"status": 200, "verdict": "no-effect", "rows": 0, "similarity": 0.0}},
+                {"ts": "t0", "hint": "none", "method": "POST", "url": "https://x/rest/v1/rpc/f",
+                 "a": {"status": 200}, "b": {"status": 200, "verdict": "inconclusive", "reason": "both answers are 8 bytes or less",
+                                            "similarity": 1.0}, "none": {"status": 401, "verdict": "blocked"}}]
+        with open(os.path.join(d, "results.jsonl"), "w") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in rows))
+        out = io.StringIO()
+        ac.results(self.ws, "test-acme", False, out=out)
+        text = out.getvalue()
+        self.assertIn("B 200 wrote rows=1 (0.00)  none 200 no-effect rows=0", text)
+        self.assertIn("B 200 inconclusive (1.00)  none 401 blocked\n", text)
+        self.assertIn("can't be compared; check by hand", text)
+        self.assertLess(text.index("CHECK"), text.index("rpc/f"))
+
 
 if __name__ == "__main__":
     unittest.main()
