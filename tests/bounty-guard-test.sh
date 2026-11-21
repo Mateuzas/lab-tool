@@ -256,6 +256,12 @@ echo "== keep-alive: many requests on one client connection (upstream connection
 got=$(docker exec "$C" bounty-run --actor human -- sh -c 'u=""; for i in $(seq 1 12); do u="$u -o /dev/null https://app.acme.test/ka-$i"; done; curl -s --http1.1 -m 15 -w "%{http_code} " $u')
 expect "$(echo $got)" "200 200 200 200 200 200 200 200 200 200 200 200" "12 keep-alive HTTP/1.1 requests through the guard all answered"
 
+echo "== browsers: parallel requests offering HTTP/2 (Burp's browser) all answered"
+# With HTTP/2 on, one multiplexed stream hung forever inside the guard (server_connect re-pins the
+# address) and a page waited on it. The guard speaks HTTP/1.1 only, so clients fall back to it.
+got=$(docker exec "$C" bounty-run --actor human -- sh -c 'u=""; for i in $(seq 1 6); do u="$u -o /dev/null https://app.acme.test/h2-$i"; done; curl -s --http2 --parallel --parallel-max 6 -m 20 -w "%{http_version}/%{http_code} " $u')
+expect "$(echo $got)" "1.1/200 1.1/200 1.1/200 1.1/200 1.1/200 1.1/200" "6 parallel requests offering HTTP/2 answered over HTTP/1.1"
+
 echo "== tools through bounty-run (proxy flag + actor header injected)"
 as_root sh -c 'printf "t1\nt2\n" > /home/hunter/words && chown hunter /home/hunter/words'
 docker exec "$C" bounty-run --actor human -- ffuf -s -u https://app.acme.test/ffuf-FUZZ -w /home/hunter/words >/dev/null 2>&1
