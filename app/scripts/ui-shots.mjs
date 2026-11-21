@@ -66,6 +66,11 @@ const programs = {
   "timer-running": ["loaded", async (p) => { await p.waitForFunction(() => document.getElementById("pg-timer")?.dataset.state === "running"); }, "synced", "active", "&t=run"],
   "timer-idle": ["loaded", async (p) => { await p.keyboard.press("T"); }, "synced", "off"],
   "timer-idle-active": ["loaded", null, "synced", "active"],
+  // Guide (FE-12): w opens it over Programs; 0–7 jump to a stage
+  "guide": ["loaded", async (p) => { await p.keyboard.press("w"); }, "synced", "active"],
+  "guide-stage": ["loaded", async (p) => { await p.keyboard.press("w"); await p.keyboard.press("7"); await p.waitForTimeout(600); }, "synced", "active"],
+  "guide-copied": ["loaded", async (p) => { await p.keyboard.press("w"); await p.keyboard.press("4"); await p.waitForTimeout(600);
+    await p.context().grantPermissions(["clipboard-read", "clipboard-write"]); await p.click("#gd-4 .gd-copy >> nth=1"); }, "synced", "active"],
 };
 const scenarios = only ?? [...lab, ...Object.keys(programs)];
 

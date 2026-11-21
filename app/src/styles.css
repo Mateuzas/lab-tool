@@ -1095,3 +1095,134 @@ tr.join .total .tbar {
   .fd-table .fd-status { width: 100px; }
   .fd-table .fd-flows { width: 52px; }
 }
+
+/* ---------- Guide (FE-12): the workflow as one page you flip to with w. A screen, not a mode:
+   it keeps the accent of the mode you came from. The memorable thing is the numbered rail, the
+   Lab route's pins and line turned on its side: stages 0–7 in the order you work. ---------- */
+.modes .mode.mode-guide {
+  --swatch: #c3ced6;
+  margin-inline: auto -14px;          /* right-aligned; the text lines up with the column edge */
+  gap: 8px;
+  color: #a9bac5;
+}
+.mode-guide .mode-name { font-weight: 400; }
+.mode-guide kbd { background: transparent; border-color: #6d7f8b; color: inherit; }
+.modes .mode.mode-guide:hover { color: #fff; }
+/* The mode you'll return to stays marked, dimmer, while the guide is up. */
+body[data-view="guide"] .modes .mode[aria-pressed="true"]:not(.mode-guide) {
+  color: #c3ced6;
+  border-bottom-color: color-mix(in srgb, var(--swatch) 40%, transparent);
+}
+
+.guide { display: none; }
+body[data-view="guide"] { height: 100vh; }
+body[data-view="guide"] .bar,
+body[data-view="guide"] #app-main,
+body[data-view="guide"] #launch { display: none; }
+body[data-view="guide"] .guide { display: flex; }
+body.popout .guide { display: none; }
+
+.guide {
+  flex: 1;
+  min-height: 0;
+  width: min(1480px, 100% - 2 * clamp(14px, 2.5vw, 40px));
+  padding-block: 14px 12px;
+  flex-direction: column;
+  gap: 12px;
+  font-size: clamp(13px, 0.15vw + 11.5px, 15px);
+  line-height: 1.45;
+}
+.guide button { height: 32px; padding: 0 12px; font-weight: 400; border-color: var(--rule); border-radius: 6px; }
+.guide button:hover { border-color: var(--ink); }
+.guide code { font: 0.95em var(--mono); }
+.guide var { font-style: normal; color: var(--cta); }
+
+.gd-head { display: flex; align-items: baseline; gap: 14px; min-width: 0; }
+.gd-head h1 { font-size: 1.6em; letter-spacing: -0.01em; }
+.gd-sub { flex: 1; margin: 0; min-width: 0; color: var(--ink-soft); }
+.gd-sub code { color: var(--ink); }
+.gd-head > button { flex: none; align-self: center; }
+
+.gd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 14em minmax(0, 1fr); gap: 20px; }
+
+/* Stage index: jump targets, and where you are while scrolling. */
+.gd-index { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.gd-index ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.gd-index a {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 5px 10px 5px 9px;
+  border-left: 3px solid transparent;
+  border-radius: 0 4px 4px 0;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+.gd-index a:hover { color: var(--ink); background: color-mix(in srgb, var(--field) 60%, transparent); }
+.gd-index a[aria-current] { color: var(--ink); border-left-color: var(--cta); background: var(--field); font-weight: 700; }
+.gd-index a[aria-current] kbd { border-color: var(--cta); color: var(--cta); }
+.gd-index-later { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--hair); }
+.gd-keys { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; padding-left: 12px; color: var(--ink-soft); font-size: 0.9em; }
+.gd-keys kbd + kbd { margin-left: 2px; }
+
+.gd-scroll {
+  position: relative;                 /* stages' offsetTop is measured from here */
+  min-height: 0;
+  overflow: auto;
+  padding: 0 28px 24px 22px;
+  background: var(--field);
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+}
+.gd-scroll:focus { outline: none; }
+.gd-stages { list-style: none; margin: 0; padding: 0; }
+
+.gd-stage { position: relative; padding: 18px 0 18px 48px; }
+.gd-stage + .gd-stage, .gd-later { border-top: 1px solid var(--hair); }
+.gd-stage h2 { margin: 0 0 10px; font-size: 1.2em; line-height: 28px; }
+/* The pin and the line down to the next one. */
+.gd-n {
+  position: absolute; left: 0; top: 18px;
+  width: 28px; height: 28px;
+  display: grid; place-items: center;
+  border: 2px solid var(--cta); border-radius: 50%;
+  background: var(--field); color: var(--cta);
+  font: 700 0.95rem / 1 var(--mono);
+}
+.gd-stages > .gd-stage::before {
+  content: ""; position: absolute; left: 13px; top: 50px; bottom: -14px; width: 2px;
+  background: color-mix(in srgb, var(--cta) 30%, var(--hair));
+}
+.gd-stages > .gd-stage:last-child::before { display: none; }
+
+.gd-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.gd-steps > li { display: grid; grid-template-columns: 5.6em minmax(0, 1fr); column-gap: 12px; align-items: baseline; }
+.gd-steps p { margin: 0; max-width: 80ch; }
+.gd-k { white-space: nowrap; }
+.gd-k kbd + kbd, .gd-steps p kbd + kbd { margin-left: 2px; }
+.gd-steps p code { padding: 0 4px; border-radius: 3px; background: var(--paper); color: var(--ink); overflow-wrap: anywhere; }
+
+/* A command: copyable, with a short line on what it does. */
+.gd-cli > .gd-cmd, .gd-cli > p { grid-column: 2; }
+.gd-cli > p { margin-top: 3px; color: var(--ink-soft); }
+.gd-cmd {
+  justify-self: start;
+  max-width: 100%;
+  display: flex; align-items: center; gap: 12px;
+  padding: 3px 3px 3px 10px;
+  border-left: 3px solid var(--rule);
+  border-radius: 4px;
+  background: var(--paper);
+}
+.gd-cmd code { min-width: 0; color: var(--ink); overflow-wrap: anywhere; }
+.guide .gd-copy { flex: none; height: 24px; padding: 0 8px; font-size: 0.88em; background: var(--field); }
+.guide .gd-copy[data-done] { border-color: var(--go); color: var(--go); }
+
+.gd-chip { padding: 0 5px; border-radius: 4px; font: 700 0.85em / 1.5 var(--sans); color: #fff; background: var(--stop); white-space: nowrap; }
+
+.gd-later h2 { color: var(--ink-soft); }
+.gd-later p { color: var(--ink-soft); }
+
+@media (max-width: 900px) {
+  .gd-body { grid-template-columns: minmax(0, 1fr); }
+  .gd-index { display: none; }
+  .gd-sub { display: none; }
+}

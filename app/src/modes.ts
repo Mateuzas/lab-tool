@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
  * Two modes in one window: Lab and Bug bounty. Lab runs a container: a stopped lab shows a launch
  * screen instead of its tabs. Bug bounty's Programs screen runs on this Mac and starts nothing, so
  * it is shown directly (no launch). The mode on screen is remembered; the default is Bug bounty.
+ * The Guide (FE-12) is a screen over either mode, not a mode: opening or closing it starts and
+ * stops nothing, and closing it shows the mode you came from.
  */
 export type Mode = "lab" | "bounty";
 
@@ -42,8 +44,9 @@ function saveMode(m: Mode) {
   }
 }
 
-export function setupModes(getStatus: () => StatusLike | null, refresh: () => Promise<void>, onShow: (m: Mode) => void) {
+export function setupModes(getStatus: () => StatusLike | null, refresh: () => Promise<void>, onShow: (m: Mode | "guide") => void) {
   let mode: Mode = loadMode(); // the mode on screen
+  let guide = false; // the Guide is over the mode
   let busy = false;
   let error = "";
 
@@ -60,7 +63,12 @@ export function setupModes(getStatus: () => StatusLike | null, refresh: () => Pr
     lab.dataset.state = labState;
     lab.textContent = { checking: "Checking", running: "Running", stopped: "Stopped" }[labState];
     for (const m of ["lab", "bounty"] as const) $(`mode-${m}`).setAttribute("aria-pressed", String(m === mode));
+    $("mode-guide").setAttribute("aria-pressed", String(guide));
 
+    if (guide) {
+      document.body.dataset.view = "guide";
+      return;
+    }
     if (mode === "bounty") {
       document.body.dataset.view = "bounty";
       return;
@@ -101,6 +109,7 @@ export function setupModes(getStatus: () => StatusLike | null, refresh: () => Pr
   for (const m of ["lab", "bounty"] as const) {
     $(`mode-${m}`).addEventListener("click", () => {
       mode = m;
+      guide = false;
       error = "";
       saveMode(m);
       draw();
@@ -108,6 +117,15 @@ export function setupModes(getStatus: () => StatusLike | null, refresh: () => Pr
     });
   }
 
+  /** Open or close the Guide. Nothing else changes: the mode underneath keeps running as it was. */
+  function showGuide(on: boolean) {
+    if (guide === on) return;
+    guide = on;
+    draw();
+    onShow(on ? "guide" : mode);
+  }
+  $("mode-guide").addEventListener("click", () => showGuide(!guide));
+
   draw();
-  return { redraw: draw, mode: () => mode };
+  return { redraw: draw, mode: () => mode, guide: showGuide };
 }

@@ -99,6 +99,7 @@ per approach (`time.jsonl` + `/v1/payouts`) after 3–4 weeks and tune the ranki
 | BE-27 | Backender | Browse-only hosts you approve per program (CDN, login): `program browse allow|remove`, candidates from your refused traffic, guard category `browse` (human, read methods by default) (CONTRACTS §3.5) | done |
 | BE-28 | Backender | Upstream connection failures (TLS verify, connect refused) aren't in the flow log: log them with the error (found in BE-27) | todo |
 | FE-11 | Frontender | Approve browse-only hosts from the app: candidates in the refusals panel (`R`), one key to approve (read) or approve for any method (§3.5) | todo |
+| FE-12 | Frontender | Guide screen (`w`, mode bar): the bounty workflow as static, scannable stages 0–7 with keys, copyable commands and what's not built yet | done |
 | BE-21b | Backender | Application state + `apply-state` + auto-accept on access-granted (CONTRACTS §11.1) | done (#31) |
 | BE-14b | Backender | Sync hygiene: snapshots only on change, needs-join re-check daily (§11.2) | done (#31) |
 | BE-23 | Backender | Manual handles in the Tauri commands + `bounty_manual_list` + `program-closed`/`program-reopened` kinds (§10.5, §11.3) | done (#31) |
